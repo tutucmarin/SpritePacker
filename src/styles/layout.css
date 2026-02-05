@@ -1,0 +1,102 @@
+.page-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #263057;
+  background: #0b1020;
+  height: 46px;
+  box-sizing: border-box;
+}
+.brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+.topbar img {
+  height: 26px;
+  width: auto;
+  display: block;
+}
+.logo-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #7c3aed;
+  box-shadow: 0 0 0 6px rgba(124, 58, 237, 0.15);
+}
+.page-shell {
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  gap: 12px;
+  flex: 1;
+  padding: 12px;
+  box-sizing: border-box;
+  height: calc(100vh - 46px);
+  overflow: hidden;
+}
+.panel {
+  background: #101827;
+  border: 1px solid #263057;
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.panel.fill {
+  height: 100%;
+  flex: 1;
+}
+.panel h2 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+}
+.scroll {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.sprite-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sprite-item {
+  padding: 8px;
+  border: 1px solid #263057;
+  border-radius: 8px;
+  background: #0f172a;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.sprite-item.active {
+  border-color: #7c3aed;
+  background: rgba(124, 58, 237, 0.1);
+}
+.sprite-index {
+  color: #94a3b8;
+  font-size: 12px;
+  width: 12px;
+  text-align: center;
+}
+.sprite-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sprite-dim {
+  flex-shrink: 0;
+}

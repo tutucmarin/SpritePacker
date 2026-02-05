@@ -1,0 +1,134 @@
+.help {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.hidden {
+  display: none;
+}
+.modeCards {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.modeCard {
+  flex: 1 1 220px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #263057;
+  border-radius: 12px;
+  background: #101827;
+  cursor: pointer;
+}
+.modeCard.active {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
+.modeCard img {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  border-radius: 8px;
+  padding: 2px;
+  box-sizing: border-box;
+}
+.subCard {
+  margin-top: 10px;
+  background: #0b1224;
+  border: 1px solid #263057;
+  border-radius: 10px;
+  padding: 8px;
+}
+.subCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.subCardHeader .subTitle {
+  font-weight: 700;
+  color: #e5e7eb;
+}
+.subIcon {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+.modeCard .title {
+  font-weight: 800;
+  color: #e5e7eb;
+}
+.optGroup {
+  margin-top: 10px;
+  background: #0b1224;
+  border: 1px dashed #334155;
+  border-radius: 10px;
+  padding: 8px;
+}
+.optTitle {
+  font-size: 12px;
+  color: #a5b4fc;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.optRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.brand .brandLogo {
+  height: 48px;
+  width: auto;
+}
+.rightIcons {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand .fun {
+  height: 48px;
+  width: auto;
+  border-radius: 8px;
+  border: 1px solid #263057;
+  background: #0f172a;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+.card {
+  background: #101827;
+  border: 1px solid #263057;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.site-footer {
+  margin: 24px 0 40px;
+  padding-top: 12px;
+  border-top: 1px solid #263057;
+  color: #94a3b8;
+  font-size: 13px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.site-footer a {
+  color: #cbd5e1;
+  text-decoration: none;
+}
+.site-footer a:hover {
+  text-decoration: underline;
+}
+.mt-6 { margin-top: 6px; }
+.mb-6 { margin-bottom: 6px; }
+.mb-12 { margin-bottom: 12px; }
