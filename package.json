@@ -9,6 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "export": "next export",
     "webpack:dev": "webpack serve --config webpack.config.cjs --mode development --port 5173 --open false",
     "webpack:build": "webpack --config webpack.config.cjs --mode production"
   },
