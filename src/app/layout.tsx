@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import "../styles/index.css";
+import { GoogleAnalytics } from "@/src/app/components/GoogleAnalytics";
 
 export const metadata = {
   title: "SpritePacker — Free Sprite Sheet Slicer & Image Splitter",
@@ -24,7 +25,10 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <GoogleAnalytics />
+      </body>
     </html>
   );
 }

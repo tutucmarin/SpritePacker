@@ -13,6 +13,7 @@ const nextConfig = {
   },
   env: {
     NEXT_PUBLIC_BASE_PATH: basePath,
+    NEXT_PUBLIC_GA_ID: process.env.NEXT_PUBLIC_GA_ID,
   },
 };
 
