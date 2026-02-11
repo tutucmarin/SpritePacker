@@ -1,19 +1,21 @@
 import { ComponentBox } from "@/src/lib/types";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Props = {
   box: ComponentBox | null;
   selectedIndex: number | null;
   onUpdate: (next: ComponentBox) => void;
   onDelete: () => void;
+  onReplace: (file: File) => void;
 };
 
-export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete }: Props) {
+export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete, onReplace }: Props) {
   const [name, setName] = useState("");
   const [x, setX] = useState(0);
   const [y, setY] = useState(0);
   const [w, setW] = useState(0);
   const [h, setH] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!box) return;
@@ -67,6 +69,34 @@ export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete }: Props) {
             </button>
             <button className="secondary btn-icon" onClick={onDelete}>
               Delete
+            </button>
+          </div>
+          <div
+            className="toolbar"
+            style={{
+              gap: 8,
+              marginTop: 8,
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <label className="small">Replace</label>
+              <div className="help">Size must match on width or height (±1px).</div>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onReplace(f);
+                if (e.target) e.target.value = "";
+              }}
+            />
+            <button className="secondary btn-icon" onClick={() => fileInputRef.current?.click()}>
+              Upload
             </button>
           </div>
         </>

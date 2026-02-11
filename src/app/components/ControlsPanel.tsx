@@ -39,6 +39,7 @@ type Props = {
   selectedIndex: number | null;
   onUpdate: (next: ComponentBox) => void;
   onDelete: () => void;
+  onReplace: (file: File) => void;
   // download
   downloadMode: "sprites" | "atlas";
   onDownloadMode: (m: "sprites" | "atlas") => void;
@@ -79,6 +80,7 @@ export function ControlsPanel(props: Props) {
     selectedIndex,
     onUpdate,
     onDelete,
+    onReplace,
     downloadMode,
     onDownloadMode,
     fmt,
@@ -127,6 +129,7 @@ export function ControlsPanel(props: Props) {
           selectedIndex={selectedIndex}
           onUpdate={onUpdate}
           onDelete={onDelete}
+          onReplace={onReplace}
         />
       )}
 

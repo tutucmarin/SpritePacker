@@ -65,6 +65,7 @@ type SpritePackerActions = {
   onDeleteSelected: () => Promise<void>;
   onClearAll: () => void;
   onUpdateSelected: (next: ComponentBox) => void;
+  onReplaceSelected: (file: File) => Promise<void>;
   onPackerChange: (
     mode: "default" | "optimal" | "maxrect",
     spacing?: number,
@@ -408,6 +409,65 @@ export function useSpritePacker(): UseSpritePackerReturn {
     }
   };
 
+  const handleReplaceSelected = async (file: File) => {
+    if (selected == null || !boxes.length) return;
+    const target = boxes[selected];
+    const nextImg = await loadImageFromFile(file);
+    const closeWidth = Math.abs(nextImg.width - target.w) <= 1;
+    const closeHeight = Math.abs(nextImg.height - target.h) <= 1;
+    if (!closeWidth && !closeHeight) {
+      alert(
+        `Replacement must match current sprite width or height (±1px). Current ${target.w}x${target.h}, new ${nextImg.width}x${nextImg.height}.`,
+      );
+      return;
+    }
+    if (target.x + nextImg.width > (img?.width ?? 0) ||
+        target.y + nextImg.height > (img?.height ?? 0)) {
+      alert("Replacement image does not fit inside the atlas bounds.");
+      return;
+    }
+
+    const redrawWithReplacement = async (
+      base: HTMLImageElement | null,
+    ): Promise<HTMLImageElement | null> => {
+      if (!base) return null;
+      const c = document.createElement("canvas");
+      c.width = base.width;
+      c.height = base.height;
+      const ctx = c.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(base, 0, 0);
+      ctx.clearRect(target.x, target.y, target.w, target.h);
+      ctx.drawImage(nextImg, target.x, target.y, nextImg.width, nextImg.height);
+      return await imageFromCanvas(c);
+    };
+
+    const [nextAtlas, nextOriginal] = await Promise.all([
+      redrawWithReplacement(img),
+      redrawWithReplacement(originalImg),
+    ]);
+
+    if (nextAtlas) setImg(nextAtlas);
+    if (nextOriginal) setOriginalImg(nextOriginal);
+
+    const updated = boxes.map((b, i) =>
+      i === selected ? { ...b, w: nextImg.width, h: nextImg.height } : b,
+    );
+    setBoxes(updated);
+    setOriginalBoxes((prev) =>
+      prev.map((b, i) =>
+        i === selected ? { ...b, w: nextImg.width, h: nextImg.height } : b,
+      ),
+    );
+    setCustomBoxes((prev) =>
+      prev
+        ? prev.map((b, i) =>
+            i === selected ? { ...b, w: nextImg.width, h: nextImg.height } : b,
+          )
+        : prev,
+    );
+  };
+
   const handleClear = () => {
     setBoxes([]);
     setOriginalBoxes([]);
@@ -536,6 +596,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
         prev.map((b, i) => (i === selected ? { ...b, ...next } : b)),
       );
     },
+    onReplaceSelected: handleReplaceSelected,
     onPackerChange: handlePackerChange,
     onAtlasWidth: onAtlasWidthChange,
     onAtlasHeight: onAtlasHeightChange,
@@ -656,6 +717,15 @@ async function clearRegion(
   ctx.drawImage(img, 0, 0);
   ctx.clearRect(box.x, box.y, box.w, box.h);
   const url = canvas.toDataURL("image/png");
+  return imageFromDataUrl(url);
+}
+
+async function imageFromCanvas(canvas: HTMLCanvasElement): Promise<HTMLImageElement> {
+  const url = canvas.toDataURL("image/png");
+  return imageFromDataUrl(url);
+}
+
+function imageFromDataUrl(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const n = new Image();
     n.onload = () => resolve(n);
