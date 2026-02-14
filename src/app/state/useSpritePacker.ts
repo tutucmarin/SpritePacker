@@ -25,7 +25,9 @@ export type JsonFormat =
   | "pixi"
   | "phaser-array"
   | "phaser-hash"
-  | "phaser3";
+  | "phaser3"
+  | "unity"
+  | "tpsheet";
 
 type DupReport = {
   count: number;
@@ -64,7 +66,11 @@ type SpritePackerActions = {
   onAddBox: (box: ComponentBox) => number | null;
   onDeleteSelected: () => Promise<void>;
   onClearAll: () => void;
-  onUpdateSelected: (next: ComponentBox) => void;
+  onUpdateSelected: (
+    next: ComponentBox,
+    applyToImage?: boolean,
+  ) => Promise<void>;
+  onReplaceSelected: (file: File) => Promise<void>;
   onPackerChange: (
     mode: "default" | "optimal" | "maxrect",
     spacing?: number,
@@ -112,7 +118,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
   );
   const [cclTol, setCclTol] = useState(16);
   const [downloadMode, setDownloadMode] = useState<"sprites" | "atlas">(
-    "sprites",
+    "atlas",
   );
   const [projectName, setProjectName] = useState("project");
   const [packerMode, setPackerMode] = useState<
@@ -307,10 +313,14 @@ export function useSpritePacker(): UseSpritePackerReturn {
     if (!file) return;
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text);
-      const next = filterNonOverlapping(parseCustomSprites(parsed, jsonFormat));
+      const next =
+        jsonFormat === "unity"
+          ? filterNonOverlapping(parseUnityAtlas(text))
+          : filterNonOverlapping(
+              parseCustomSprites(JSON.parse(text), jsonFormat),
+            );
       if (!next.length) {
-        alert("No sprites found in uploaded JSON.");
+        alert("No sprites found in uploaded file.");
         return;
       }
       setBoxes(next);
@@ -324,7 +334,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       }
     } catch (err) {
       console.error(err);
-      alert("Failed to read custom JSON. Please check the format.");
+      alert("Failed to read custom data. Please check the format.");
     }
   };
 
@@ -408,6 +418,67 @@ export function useSpritePacker(): UseSpritePackerReturn {
     }
   };
 
+  const handleReplaceSelected = async (file: File) => {
+    if (selected == null || !boxes.length) return;
+    const target = boxes[selected];
+    const nextImg = await loadImageFromFile(file);
+    const closeWidth = Math.abs(nextImg.width - target.w) <= 1;
+    const closeHeight = Math.abs(nextImg.height - target.h) <= 1;
+    if (!closeWidth && !closeHeight) {
+      alert(
+        `Replacement must match current sprite width or height (±1px). Current ${target.w}x${target.h}, new ${nextImg.width}x${nextImg.height}.`,
+      );
+      return;
+    }
+    if (
+      target.x + nextImg.width > (img?.width ?? 0) ||
+      target.y + nextImg.height > (img?.height ?? 0)
+    ) {
+      alert("Replacement image does not fit inside the atlas bounds.");
+      return;
+    }
+
+    const redrawWithReplacement = async (
+      base: HTMLImageElement | null,
+    ): Promise<HTMLImageElement | null> => {
+      if (!base) return null;
+      const c = document.createElement("canvas");
+      c.width = base.width;
+      c.height = base.height;
+      const ctx = c.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(base, 0, 0);
+      ctx.clearRect(target.x, target.y, target.w, target.h);
+      ctx.drawImage(nextImg, target.x, target.y, nextImg.width, nextImg.height);
+      return await imageFromCanvas(c);
+    };
+
+    const [nextAtlas, nextOriginal] = await Promise.all([
+      redrawWithReplacement(img),
+      redrawWithReplacement(originalImg),
+    ]);
+
+    if (nextAtlas) setImg(nextAtlas);
+    if (nextOriginal) setOriginalImg(nextOriginal);
+
+    const updated = boxes.map((b, i) =>
+      i === selected ? { ...b, w: nextImg.width, h: nextImg.height } : b,
+    );
+    setBoxes(updated);
+    setOriginalBoxes((prev) =>
+      prev.map((b, i) =>
+        i === selected ? { ...b, w: nextImg.width, h: nextImg.height } : b,
+      ),
+    );
+    setCustomBoxes((prev) =>
+      prev
+        ? prev.map((b, i) =>
+            i === selected ? { ...b, w: nextImg.width, h: nextImg.height } : b,
+          )
+        : prev,
+    );
+  };
+
   const handleClear = () => {
     setBoxes([]);
     setOriginalBoxes([]);
@@ -442,6 +513,8 @@ export function useSpritePacker(): UseSpritePackerReturn {
 
   const downloadAtlasZip = async () => {
     if (!img || !boxes.length) return;
+    const baseName = safeProjectName(projectName);
+    const imageName = `${baseName}.png`;
     const zip = new JSZip();
     const imgCanvas = document.createElement("canvas");
     imgCanvas.width = img.width;
@@ -449,7 +522,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
     const ctx = imgCanvas.getContext("2d")!;
     ctx.drawImage(img, 0, 0);
     const imgBlob = await toBlob(imgCanvas, "image/png");
-    zip.file(`${safeProjectName(projectName)}-atlas.png`, imgBlob);
+    zip.file(imageName, imgBlob);
     const ordered = orderBoxes(boxes);
     const frames = ordered.map((b, i) => ({
       filename: (b.name && b.name.trim()) || `sprite-${i + 1}`,
@@ -462,14 +535,21 @@ export function useSpritePacker(): UseSpritePackerReturn {
     const meta = {
       app: "{http://spritepacker.app/}",
       version: "SpritePacker v.1.0.0",
-      image: `${safeProjectName(projectName)}-atlas.png`,
+      image: imageName,
       size: { w: img.width, h: img.height },
       scale: 1,
     };
-    const payload = buildPayloadForFormat(jsonFormat, frames, meta);
-    zip.file("sprites.json", JSON.stringify(payload, null, 2));
+    if (jsonFormat === "unity") {
+      const atlasText = buildUnityAtlas(frames, meta);
+      zip.file(`${baseName}.atlas`, atlasText);
+    } else {
+      const payload = buildPayloadForFormat(jsonFormat, frames, meta);
+      const ext = jsonFormat === "tpsheet" ? "tpsheet" : "json";
+      const name = `${baseName}.${ext}`;
+      zip.file(name, JSON.stringify(payload, null, 2));
+    }
     const content = await zip.generateAsync({ type: "blob" });
-    triggerDownload(content, `${safeProjectName(projectName)}-atlas.zip`);
+    triggerDownload(content, `${baseName}.zip`);
   };
 
   const handlePackerChange = async (
@@ -527,15 +607,59 @@ export function useSpritePacker(): UseSpritePackerReturn {
     onAddBox: addBoxIfNonOverlap,
     onDeleteSelected: handleDelete,
     onClearAll: handleClear,
-    onUpdateSelected: (next) => {
+    onUpdateSelected: async (next, applyToImage = false) => {
       if (selected == null || !selectedBox) return;
+      const nextBox: ComponentBox = { ...selectedBox, ...next };
+      const geometryChanged =
+        selectedBox.x !== nextBox.x ||
+        selectedBox.y !== nextBox.y ||
+        selectedBox.w !== nextBox.w ||
+        selectedBox.h !== nextBox.h;
+
+      if (applyToImage && geometryChanged) {
+        if (img && !isBoxInsideImage(nextBox, img)) {
+          alert("Updated sprite bounds must stay inside the atlas image.");
+          return;
+        }
+        if (originalImg && !isBoxInsideImage(nextBox, originalImg)) {
+          alert("Updated sprite bounds must stay inside the atlas image.");
+          return;
+        }
+
+        const [nextAtlas, nextOriginal] = await Promise.all([
+          img
+            ? transformImageRegion(img, selectedBox, nextBox)
+            : Promise.resolve(null),
+          originalImg
+            ? transformImageRegion(originalImg, selectedBox, nextBox)
+            : Promise.resolve(null),
+        ]);
+
+        if (img && !nextAtlas) {
+          alert("Could not apply sprite changes to atlas image.");
+          return;
+        }
+        if (originalImg && !nextOriginal) {
+          alert("Could not apply sprite changes to source image.");
+          return;
+        }
+        if (nextAtlas) setImg(nextAtlas);
+        if (nextOriginal) setOriginalImg(nextOriginal);
+      }
+
       setBoxes((prev) =>
-        prev.map((b, i) => (i === selected ? { ...b, ...next } : b)),
+        prev.map((b, i) => (i === selected ? { ...b, ...nextBox } : b)),
       );
       setOriginalBoxes((prev) =>
-        prev.map((b, i) => (i === selected ? { ...b, ...next } : b)),
+        prev.map((b, i) => (i === selected ? { ...b, ...nextBox } : b)),
+      );
+      setCustomBoxes((prev) =>
+        prev
+          ? prev.map((b, i) => (i === selected ? { ...b, ...nextBox } : b))
+          : prev,
       );
     },
+    onReplaceSelected: handleReplaceSelected,
     onPackerChange: handlePackerChange,
     onAtlasWidth: onAtlasWidthChange,
     onAtlasHeight: onAtlasHeightChange,
@@ -585,8 +709,65 @@ function toHash(
   return obj;
 }
 
+function parseUnityAtlas(text: string): ComponentBox[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const boxes: ComponentBox[] = [];
+  let pageSeen = false;
+  let current: {
+    name: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null = null;
+
+  const flush = () => {
+    if (current && current.w > 0 && current.h > 0) {
+      boxes.push({
+        id: boxes.length + 1,
+        name: current.name,
+        x: current.x,
+        y: current.y,
+        w: current.w,
+        h: current.h,
+      });
+    }
+  };
+
+  for (const raw of lines) {
+    const isIndented = raw.startsWith(" ") || raw.startsWith("\t");
+    const line = raw.trim();
+    if (!line) continue;
+
+    if (!isIndented) {
+      if (!pageSeen) {
+        pageSeen = true;
+        continue;
+      }
+      flush();
+      current = { name: line, x: 0, y: 0, w: 0, h: 0 };
+      continue;
+    }
+
+    if (!current) continue;
+    const [key, value] = line.split(":").map((s) => s.trim());
+    if (!key || !value) continue;
+    if (key === "xy") {
+      const [x, y] = value.split(",").map((n) => parseInt(n.trim(), 10) || 0);
+      current.x = x;
+      current.y = y;
+    } else if (key === "size") {
+      const [w, h] = value.split(",").map((n) => parseInt(n.trim(), 10) || 0);
+      current.w = w;
+      current.h = h;
+    }
+  }
+  flush();
+  return boxes;
+}
+
 function parseCustomSprites(data: any, format: JsonFormat): ComponentBox[] {
-  if (format === "json-array") {
+  if (format === "json-array" || format === "tpsheet") {
     const frames = Array.isArray(data) ? data : data?.frames;
     if (!Array.isArray(frames)) return [];
     return frames
@@ -656,6 +837,64 @@ async function clearRegion(
   ctx.drawImage(img, 0, 0);
   ctx.clearRect(box.x, box.y, box.w, box.h);
   const url = canvas.toDataURL("image/png");
+  return imageFromDataUrl(url);
+}
+
+function isBoxInsideImage(box: ComponentBox, img: HTMLImageElement): boolean {
+  return (
+    box.x >= 0 &&
+    box.y >= 0 &&
+    box.w > 0 &&
+    box.h > 0 &&
+    box.x + box.w <= img.width &&
+    box.y + box.h <= img.height
+  );
+}
+
+async function transformImageRegion(
+  img: HTMLImageElement,
+  from: ComponentBox,
+  to: ComponentBox,
+): Promise<HTMLImageElement | null> {
+  if (!isBoxInsideImage(from, img) || !isBoxInsideImage(to, img)) return null;
+
+  const source = document.createElement("canvas");
+  source.width = from.w;
+  source.height = from.h;
+  const sourceCtx = source.getContext("2d");
+  if (!sourceCtx) return null;
+  sourceCtx.drawImage(
+    img,
+    from.x,
+    from.y,
+    from.w,
+    from.h,
+    0,
+    0,
+    from.w,
+    from.h,
+  );
+
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0);
+  ctx.clearRect(from.x, from.y, from.w, from.h);
+  ctx.drawImage(source, 0, 0, from.w, from.h, to.x, to.y, to.w, to.h);
+
+  return await imageFromCanvas(canvas);
+}
+
+async function imageFromCanvas(
+  canvas: HTMLCanvasElement,
+): Promise<HTMLImageElement> {
+  const url = canvas.toDataURL("image/png");
+  return imageFromDataUrl(url);
+}
+
+function imageFromDataUrl(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const n = new Image();
     n.onload = () => resolve(n);
@@ -764,6 +1003,37 @@ function hashCanvas(c: HTMLCanvasElement) {
   return hashBytes(data);
 }
 
+function buildUnityAtlas(
+  frames: {
+    filename: string;
+    frame: { x: number; y: number; w: number; h: number };
+    rotated: boolean;
+    trimmed: boolean;
+    spriteSourceSize: { x: number; y: number; w: number; h: number };
+    sourceSize: { w: number; h: number };
+  }[],
+  meta: { image: string },
+) {
+  const lines: string[] = [
+    meta.image,
+    "format: RGBA8888",
+    "filter: Nearest,Nearest",
+    "repeat: none",
+  ];
+
+  frames.forEach((f) => {
+    lines.push(f.filename);
+    lines.push("  rotate: false");
+    lines.push(`  xy: ${f.frame.x}, ${f.frame.y}`);
+    lines.push(`  size: ${f.frame.w}, ${f.frame.h}`);
+    lines.push(`  orig: ${f.sourceSize.w}, ${f.sourceSize.h}`);
+    lines.push("  offset: 0, 0");
+    lines.push("  index: -1");
+  });
+
+  return lines.join("\n");
+}
+
 function buildPayloadForFormat(
   format: JsonFormat,
   frames: {
@@ -779,11 +1049,13 @@ function buildPayloadForFormat(
   switch (format) {
     case "json-array":
     case "phaser-array":
+    case "tpsheet":
       return { frames, meta };
     case "json-hash":
     case "pixi":
     case "phaser-hash":
     case "phaser3":
+    case "unity":
     default:
       return { frames: toHash(frames), meta };
   }

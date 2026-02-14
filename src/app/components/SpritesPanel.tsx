@@ -1,5 +1,5 @@
 import { ComponentBox } from "@/src/lib/types";
-import { ChangeEvent } from "react";
+import { ChangeEvent, useMemo, useState } from "react";
 
 type Props = {
   boxes: ComponentBox[];
@@ -16,10 +16,20 @@ export function SpritesPanel({
   onFiles,
   itemRefs,
 }: Props) {
+  const [query, setQuery] = useState("");
+
   const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
     onFiles(e.target.files || undefined);
   };
   const inputId = "file-input-sprites";
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredBoxes = useMemo(() => {
+    const indexed = boxes.map((box, index) => ({ box, index }));
+    if (!normalizedQuery) return indexed;
+    return indexed.filter(({ box }, i) =>
+      (box.name || `sprite-${i + 1}`).toLowerCase().includes(normalizedQuery),
+    );
+  }, [boxes, normalizedQuery]);
 
   return (
     <div className="panel">
@@ -36,10 +46,30 @@ export function SpritesPanel({
       <label
         htmlFor={inputId}
         className="button-like"
-        style={{ marginBottom: 26 }}
+        style={{ marginBottom: 10 }}
       >
         Add Images
       </label>
+      <div className="sprite-search">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search sprites"
+          disabled={boxes.length === 0}
+          aria-label="Search sprites"
+        />
+        <button
+          type="button"
+          className="sprite-search-clear"
+          onClick={() => setQuery("")}
+          disabled={boxes.length === 0 || query.length === 0}
+          aria-label="Clear search"
+          title="Clear search"
+        >
+          x
+        </button>
+      </div>
       <h2 style={{ marginBottom: 6 }}>
         Sprites{" "}
         <span style={{ color: "#94a3b8", fontWeight: 600 }}>
@@ -52,7 +82,10 @@ export function SpritesPanel({
             No sprites yet. Load an image and click Auto-detect.
           </div>
         )}
-        {boxes.map((b, i) => (
+        {boxes.length > 0 && filteredBoxes.length === 0 && (
+          <div className="help">No sprites match your search.</div>
+        )}
+        {filteredBoxes.map(({ box: b, index: i }) => (
           <div
             key={b.id ?? i}
             className={`sprite-item ${selected === i ? "active" : ""}`}

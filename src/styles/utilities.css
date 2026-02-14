@@ -1,6 +1,6 @@
 .help {
   color: #94a3b8;
-  font-size: 12px;
+  font-size: 11px;
 }
 .hidden {
   display: none;
@@ -129,6 +129,12 @@
 .site-footer a:hover {
   text-decoration: underline;
 }
-.mt-6 { margin-top: 6px; }
-.mb-6 { margin-bottom: 6px; }
-.mb-12 { margin-bottom: 12px; }
+.mt-6 {
+  margin-top: 6px;
+}
+.mb-6 {
+  margin-bottom: 6px;
+}
+.mb-12 {
+  margin-bottom: 12px;
+}

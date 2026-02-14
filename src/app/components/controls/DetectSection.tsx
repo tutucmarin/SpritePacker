@@ -1,3 +1,5 @@
+import type { JsonFormat } from "@/src/app/components/controls/ProjectSection";
+
 type Props = {
   bgMode: "auto" | "alpha" | "key" | "custom";
   cclTol: number;
@@ -5,6 +7,7 @@ type Props = {
   onTol: (v: number) => void;
   onDetect: () => void;
   onCustomJson: (file?: File) => void;
+  jsonFormat: JsonFormat;
 };
 
 export function DetectSection({
@@ -14,8 +17,21 @@ export function DetectSection({
   onTol,
   onDetect,
   onCustomJson,
+  jsonFormat,
 }: Props) {
   const inputId = "detect-custom-json";
+  const accept =
+    jsonFormat === "unity"
+      ? ".atlas,text/plain"
+      : jsonFormat === "tpsheet"
+        ? ".tpsheet,application/json,application/vnd.api+json,.json"
+        : "application/json,application/vnd.api+json,.json";
+  const buttonLabel =
+    jsonFormat === "unity"
+      ? "Upload .atlas"
+      : jsonFormat === "tpsheet"
+        ? "Upload .tpsheet"
+        : "Upload JSON";
 
   return (
     <div className="section-compact">
@@ -62,12 +78,12 @@ export function DetectSection({
             <input
               id={inputId}
               type="file"
-              accept="application/json"
+              accept={accept}
               onChange={(e) => onDetectCustom(e, onCustomJson)}
               style={{ display: "none" }}
             />
             <label htmlFor={inputId} className="button-like">
-              Upload
+              {buttonLabel}
             </label>
           </div>
         </div>

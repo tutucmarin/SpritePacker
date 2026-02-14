@@ -1,24 +1,38 @@
 import { ComponentBox } from "@/src/lib/types";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Props = {
   box: ComponentBox | null;
   selectedIndex: number | null;
-  onUpdate: (next: ComponentBox) => void;
+  onUpdate: (
+    next: ComponentBox,
+    applyToImage?: boolean,
+  ) => Promise<void> | void;
   onDelete: () => void;
+  onReplace: (file: File) => void;
 };
 
-export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete }: Props) {
+export function SpriteInfo({
+  box,
+  selectedIndex,
+  onUpdate,
+  onDelete,
+  onReplace,
+}: Props) {
   const [name, setName] = useState("");
   const [x, setX] = useState(0);
   const [y, setY] = useState(0);
   const [w, setW] = useState(0);
   const [h, setH] = useState(0);
+  const [applyToImage, setApplyToImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!box) return;
     const fallback =
-      box.name && box.name.trim().length ? box.name : `sprite-${(selectedIndex ?? 0) + 1}`;
+      box.name && box.name.trim().length
+        ? box.name
+        : `sprite-${(selectedIndex ?? 0) + 1}`;
     setName(fallback);
     setX(box.x);
     setY(box.y);
@@ -28,10 +42,20 @@ export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete }: Props) {
 
   return (
     <div className="section-compact">
-      <h3>Sprite Info</h3>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-start",
+          gap: 6,
+        }}
+      >
+        <h3 style={{ margin: 0 }}>Sprite Info</h3>{" "}
+        <span className="help">#{(selectedIndex ?? 0) + 1}</span>
+      </div>
+
       {box ? (
         <>
-          <div className="toolbar" style={{ marginBottom: 6, flexWrap: "wrap" }}>
+          <div className="toolbar" style={{ marginBottom: 6 }}>
             <input
               type="text"
               value={name}
@@ -46,26 +70,78 @@ export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete }: Props) {
             <NumberInput label="w" value={w} onChange={setW} min={1} />
             <NumberInput label="h" value={h} onChange={setH} min={1} />
           </div>
-          <div className="help" style={{ marginBottom: 8 }}>
-            #{(selectedIndex ?? 0) + 1}
+          <div className="toolbar" style={{ marginTop: 8 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={applyToImage}
+                onChange={(e) => setApplyToImage(e.target.checked)}
+              />
+              <span className="help">
+                Apply x/y/w/h changes to image pixels
+              </span>
+            </label>
           </div>
-          <div className="toolbar" style={{ gap: 8 }}>
+          <div
+            className="toolbar"
+            style={{
+              gap: 8,
+              marginTop: 8,
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: 2,
+              }}
+            >
+              <label className="small">Replace</label>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onReplace(f);
+                if (e.target) e.target.value = "";
+              }}
+            />
+            <button
+              className="secondary btn-icon"
+              style={{ marginLeft: "auto" }}
+              title="Size must match on width or height (±1px)."
+              aria-label="Upload replacement sprite (size must match on width or height, plus or minus one pixel)"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Upload
+            </button>
+          </div>
+          <div className="toolbar" style={{ gap: 8, marginTop: 10 }}>
             <button
               className="secondary"
               onClick={() =>
-                onUpdate({
-                  ...box,
-                  name,
-                  x: clampInt(x),
-                  y: clampInt(y),
-                  w: Math.max(1, clampInt(w)),
-                  h: Math.max(1, clampInt(h)),
-                })
+                onUpdate(
+                  {
+                    ...box,
+                    name,
+                    x: clampInt(x),
+                    y: clampInt(y),
+                    w: Math.max(1, clampInt(w)),
+                    h: Math.max(1, clampInt(h)),
+                  },
+                  applyToImage,
+                )
               }
             >
-              Save
+              Apply
             </button>
-            <button className="secondary btn-icon" onClick={onDelete}>
+            <button className="danger btn-icon" onClick={onDelete}>
               Delete
             </button>
           </div>

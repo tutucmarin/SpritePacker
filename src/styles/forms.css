@@ -48,6 +48,10 @@ button {
 button.secondary {
   background: #334155;
 }
+button.danger {
+  background: #aa2626;
+  color: #fff;
+}
 .btn-icon {
   display: inline-flex;
   align-items: center;

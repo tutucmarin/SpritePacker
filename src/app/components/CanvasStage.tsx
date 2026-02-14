@@ -31,7 +31,7 @@ export function CanvasStage({
   overlayRef,
   canvasRef,
 }: Props) {
-  const { zoom, pan, isPanning, overlayHandlers, onWheel, resetZoom } =
+  const { zoom, pan, isPanning, draftBox, overlayHandlers, onWheel, resetZoom } =
     useCanvasInteractions({
       img,
       boxes,
@@ -78,7 +78,21 @@ export function CanvasStage({
       octx.strokeRect(b.x + 0.5, b.y + 0.5, b.w, b.h);
       octx.fillRect(b.x, b.y, b.w, b.h);
     });
-  }, [img, boxes, selected, canvasRef, overlayRef, background]);
+    if (draftBox && draftBox.w > 0 && draftBox.h > 0) {
+      octx.strokeStyle = "rgba(96,165,250,0.98)";
+      octx.fillStyle = "rgba(96,165,250,0.14)";
+      octx.lineWidth = 1;
+      octx.setLineDash([5, 3]);
+      octx.strokeRect(
+        draftBox.x + 0.5,
+        draftBox.y + 0.5,
+        draftBox.w,
+        draftBox.h,
+      );
+      octx.fillRect(draftBox.x, draftBox.y, draftBox.w, draftBox.h);
+      octx.setLineDash([]);
+    }
+  }, [img, boxes, selected, draftBox, canvasRef, overlayRef, background]);
 
   useEffect(() => {
     if (overlayRef.current) {

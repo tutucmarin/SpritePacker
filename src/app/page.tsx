@@ -100,6 +100,7 @@ export default function Page() {
           selectedIndex={selected}
           onUpdate={actions.onUpdateSelected}
           onDelete={actions.onDeleteSelected}
+          onReplace={actions.onReplaceSelected}
           downloadMode={downloadMode}
           onDownloadMode={actions.onDownloadMode}
           fmt={fmt}
