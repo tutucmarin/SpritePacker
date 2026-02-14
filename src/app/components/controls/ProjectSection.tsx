@@ -30,7 +30,9 @@ export type JsonFormat =
   | "pixi"
   | "phaser-array"
   | "phaser-hash"
-  | "phaser3";
+  | "phaser3"
+  | "unity"
+  | "tpsheet";
 
 export function ProjectSection({
   projectName,
@@ -151,6 +153,8 @@ export function ProjectSection({
             <option value="phaser-array">Phaser Array</option>
             <option value="phaser-hash">Phaser - Hash</option>
             <option value="phaser3">Phaser 3</option>
+            <option value="unity">Unity (.atlas)</option>
+            <option value="tpsheet">TP Sheet</option>
           </select>
         </div>
       </div>

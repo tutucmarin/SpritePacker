@@ -12,21 +12,25 @@ type Props = {
   projectName: string;
   onProjectName: (v: string) => void;
   packerMode: "default" | "optimal" | "maxrect";
-  onPackerChange: (v: "default" | "optimal" | "maxrect", spacing?: number) => void;
+  onPackerChange: (
+    v: "default" | "optimal" | "maxrect",
+    spacing?: number,
+  ) => void;
   atlasWidth: number | null;
   atlasHeight: number | null;
   onAtlasWidth: (v: number | null) => void;
   onAtlasHeight: (v: number | null) => void;
   fixedSize: boolean;
   onFixedSize: (v: boolean) => void;
-  jsonFormat: JsonFormat;
   onJsonFormat: (v: JsonFormat) => void;
   onClearAll: () => void;
   spacing: number;
   onSpacing: (v: number) => void;
   onDetectDuplicates: () => void;
   background: "transparent" | "clear" | "white" | "pink" | "black";
-  onBackground: (v: "transparent" | "clear" | "white" | "pink" | "black") => void;
+  onBackground: (
+    v: "transparent" | "clear" | "white" | "pink" | "black",
+  ) => void;
   // detect
   bgMode: "auto" | "alpha" | "key" | "custom";
   cclTol: number;
@@ -34,6 +38,7 @@ type Props = {
   onTol: (v: number) => void;
   onDetect: () => void;
   onCustomJson: (file?: File) => void;
+  jsonFormat: JsonFormat;
   // sprite info
   selectedBox: ComponentBox | null;
   selectedIndex: number | null;
@@ -121,6 +126,7 @@ export function ControlsPanel(props: Props) {
         onTol={onTol}
         onDetect={onDetect}
         onCustomJson={onCustomJson}
+        jsonFormat={jsonFormat}
       />
 
       {selectedBox && (

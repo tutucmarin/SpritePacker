@@ -25,7 +25,9 @@ export type JsonFormat =
   | "pixi"
   | "phaser-array"
   | "phaser-hash"
-  | "phaser3";
+  | "phaser3"
+  | "unity"
+  | "tpsheet";
 
 type DupReport = {
   count: number;
@@ -308,10 +310,14 @@ export function useSpritePacker(): UseSpritePackerReturn {
     if (!file) return;
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text);
-      const next = filterNonOverlapping(parseCustomSprites(parsed, jsonFormat));
+      const next =
+        jsonFormat === "unity"
+          ? filterNonOverlapping(parseUnityAtlas(text))
+          : filterNonOverlapping(
+              parseCustomSprites(JSON.parse(text), jsonFormat),
+            );
       if (!next.length) {
-        alert("No sprites found in uploaded JSON.");
+        alert("No sprites found in uploaded file.");
         return;
       }
       setBoxes(next);
@@ -325,7 +331,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       }
     } catch (err) {
       console.error(err);
-      alert("Failed to read custom JSON. Please check the format.");
+      alert("Failed to read custom data. Please check the format.");
     }
   };
 
@@ -526,8 +532,18 @@ export function useSpritePacker(): UseSpritePackerReturn {
       size: { w: img.width, h: img.height },
       scale: 1,
     };
-    const payload = buildPayloadForFormat(jsonFormat, frames, meta);
-    zip.file("sprites.json", JSON.stringify(payload, null, 2));
+    if (jsonFormat === "unity") {
+      const atlasText = buildUnityAtlas(frames, meta);
+      zip.file(`${safeProjectName(projectName)}-atlas.atlas`, atlasText);
+    } else {
+      const payload = buildPayloadForFormat(jsonFormat, frames, meta);
+      const ext = jsonFormat === "tpsheet" ? "tpsheet" : "json";
+      const name =
+        jsonFormat === "tpsheet"
+          ? `${safeProjectName(projectName)}-atlas.${ext}`
+          : "sprites.json";
+      zip.file(name, JSON.stringify(payload, null, 2));
+    }
     const content = await zip.generateAsync({ type: "blob" });
     triggerDownload(content, `${safeProjectName(projectName)}-atlas.zip`);
   };
@@ -646,8 +662,60 @@ function toHash(
   return obj;
 }
 
+function parseUnityAtlas(text: string): ComponentBox[] {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const boxes: ComponentBox[] = [];
+  let pageSeen = false;
+  let current: { name: string; x: number; y: number; w: number; h: number } | null =
+    null;
+
+  const flush = () => {
+    if (current && current.w > 0 && current.h > 0) {
+      boxes.push({
+        id: boxes.length + 1,
+        name: current.name,
+        x: current.x,
+        y: current.y,
+        w: current.w,
+        h: current.h,
+      });
+    }
+  };
+
+  for (const raw of lines) {
+    const isIndented = raw.startsWith(" ") || raw.startsWith("\t");
+    const line = raw.trim();
+    if (!line) continue;
+
+    if (!isIndented) {
+      if (!pageSeen) {
+        pageSeen = true;
+        continue;
+      }
+      flush();
+      current = { name: line, x: 0, y: 0, w: 0, h: 0 };
+      continue;
+    }
+
+    if (!current) continue;
+    const [key, value] = line.split(":").map((s) => s.trim());
+    if (!key || !value) continue;
+    if (key === "xy") {
+      const [x, y] = value.split(",").map((n) => parseInt(n.trim(), 10) || 0);
+      current.x = x;
+      current.y = y;
+    } else if (key === "size") {
+      const [w, h] = value.split(",").map((n) => parseInt(n.trim(), 10) || 0);
+      current.w = w;
+      current.h = h;
+    }
+  }
+  flush();
+  return boxes;
+}
+
 function parseCustomSprites(data: any, format: JsonFormat): ComponentBox[] {
-  if (format === "json-array") {
+  if (format === "json-array" || format === "tpsheet") {
     const frames = Array.isArray(data) ? data : data?.frames;
     if (!Array.isArray(frames)) return [];
     return frames
@@ -834,6 +902,37 @@ function hashCanvas(c: HTMLCanvasElement) {
   return hashBytes(data);
 }
 
+function buildUnityAtlas(
+  frames: {
+    filename: string;
+    frame: { x: number; y: number; w: number; h: number };
+    rotated: boolean;
+    trimmed: boolean;
+    spriteSourceSize: { x: number; y: number; w: number; h: number };
+    sourceSize: { w: number; h: number };
+  }[],
+  meta: { image: string },
+) {
+  const lines: string[] = [
+    meta.image,
+    "format: RGBA8888",
+    "filter: Nearest,Nearest",
+    "repeat: none",
+  ];
+
+  frames.forEach((f) => {
+    lines.push(f.filename);
+    lines.push("  rotate: false");
+    lines.push(`  xy: ${f.frame.x}, ${f.frame.y}`);
+    lines.push(`  size: ${f.frame.w}, ${f.frame.h}`);
+    lines.push(`  orig: ${f.sourceSize.w}, ${f.sourceSize.h}`);
+    lines.push("  offset: 0, 0");
+    lines.push("  index: -1");
+  });
+
+  return lines.join("\n");
+}
+
 function buildPayloadForFormat(
   format: JsonFormat,
   frames: {
@@ -849,11 +948,13 @@ function buildPayloadForFormat(
   switch (format) {
     case "json-array":
     case "phaser-array":
+    case "tpsheet":
       return { frames, meta };
     case "json-hash":
     case "pixi":
     case "phaser-hash":
     case "phaser3":
+    case "unity":
     default:
       return { frames: toHash(frames), meta };
   }
