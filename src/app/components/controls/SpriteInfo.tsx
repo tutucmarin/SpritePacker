@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 type Props = {
   box: ComponentBox | null;
   selectedIndex: number | null;
-  onUpdate: (next: ComponentBox) => void;
+  onUpdate: (
+    next: ComponentBox,
+    applyToImage?: boolean,
+  ) => Promise<void> | void;
   onDelete: () => void;
   onReplace: (file: File) => void;
 };
@@ -21,6 +24,7 @@ export function SpriteInfo({
   const [y, setY] = useState(0);
   const [w, setW] = useState(0);
   const [h, setH] = useState(0);
+  const [applyToImage, setApplyToImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -38,14 +42,20 @@ export function SpriteInfo({
 
   return (
     <div className="section-compact">
-      <h3>Sprite Info</h3>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-start",
+          gap: 6,
+        }}
+      >
+        <h3 style={{ margin: 0 }}>Sprite Info</h3>{" "}
+        <span className="help">#{(selectedIndex ?? 0) + 1}</span>
+      </div>
+
       {box ? (
         <>
-          <div
-            className="toolbar"
-            style={{ marginBottom: 6, alignItems: "center" }}
-          >
-            <div className="help">#{(selectedIndex ?? 0) + 1}</div>
+          <div className="toolbar" style={{ marginBottom: 6 }}>
             <input
               type="text"
               value={name}
@@ -59,6 +69,18 @@ export function SpriteInfo({
             <NumberInput label="y" value={y} onChange={setY} />
             <NumberInput label="w" value={w} onChange={setW} min={1} />
             <NumberInput label="h" value={h} onChange={setH} min={1} />
+          </div>
+          <div className="toolbar" style={{ marginTop: 8 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={applyToImage}
+                onChange={(e) => setApplyToImage(e.target.checked)}
+              />
+              <span className="help">
+                Apply x/y/w/h changes to image pixels
+              </span>
+            </label>
           </div>
           <div
             className="toolbar"
@@ -99,26 +121,29 @@ export function SpriteInfo({
             >
               Upload
             </button>
-            <div className="toolbar" style={{ gap: 8, marginTop: 22 }}>
-              <button
-                className="secondary"
-                onClick={() =>
-                  onUpdate({
+          </div>
+          <div className="toolbar" style={{ gap: 8, marginTop: 10 }}>
+            <button
+              className="secondary"
+              onClick={() =>
+                onUpdate(
+                  {
                     ...box,
                     name,
                     x: clampInt(x),
                     y: clampInt(y),
                     w: Math.max(1, clampInt(w)),
                     h: Math.max(1, clampInt(h)),
-                  })
-                }
-              >
-                Save
-              </button>
-              <button className="secondary btn-icon" onClick={onDelete}>
-                Delete
-              </button>
-            </div>
+                  },
+                  applyToImage,
+                )
+              }
+            >
+              Apply
+            </button>
+            <button className="danger btn-icon" onClick={onDelete}>
+              Delete
+            </button>
           </div>
         </>
       ) : (

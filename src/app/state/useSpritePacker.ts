@@ -66,7 +66,10 @@ type SpritePackerActions = {
   onAddBox: (box: ComponentBox) => number | null;
   onDeleteSelected: () => Promise<void>;
   onClearAll: () => void;
-  onUpdateSelected: (next: ComponentBox) => void;
+  onUpdateSelected: (
+    next: ComponentBox,
+    applyToImage?: boolean,
+  ) => Promise<void>;
   onReplaceSelected: (file: File) => Promise<void>;
   onPackerChange: (
     mode: "default" | "optimal" | "maxrect",
@@ -603,13 +606,56 @@ export function useSpritePacker(): UseSpritePackerReturn {
     onAddBox: addBoxIfNonOverlap,
     onDeleteSelected: handleDelete,
     onClearAll: handleClear,
-    onUpdateSelected: (next) => {
+    onUpdateSelected: async (next, applyToImage = false) => {
       if (selected == null || !selectedBox) return;
+      const nextBox: ComponentBox = { ...selectedBox, ...next };
+      const geometryChanged =
+        selectedBox.x !== nextBox.x ||
+        selectedBox.y !== nextBox.y ||
+        selectedBox.w !== nextBox.w ||
+        selectedBox.h !== nextBox.h;
+
+      if (applyToImage && geometryChanged) {
+        if (img && !isBoxInsideImage(nextBox, img)) {
+          alert("Updated sprite bounds must stay inside the atlas image.");
+          return;
+        }
+        if (originalImg && !isBoxInsideImage(nextBox, originalImg)) {
+          alert("Updated sprite bounds must stay inside the atlas image.");
+          return;
+        }
+
+        const [nextAtlas, nextOriginal] = await Promise.all([
+          img
+            ? transformImageRegion(img, selectedBox, nextBox)
+            : Promise.resolve(null),
+          originalImg
+            ? transformImageRegion(originalImg, selectedBox, nextBox)
+            : Promise.resolve(null),
+        ]);
+
+        if (img && !nextAtlas) {
+          alert("Could not apply sprite changes to atlas image.");
+          return;
+        }
+        if (originalImg && !nextOriginal) {
+          alert("Could not apply sprite changes to source image.");
+          return;
+        }
+        if (nextAtlas) setImg(nextAtlas);
+        if (nextOriginal) setOriginalImg(nextOriginal);
+      }
+
       setBoxes((prev) =>
-        prev.map((b, i) => (i === selected ? { ...b, ...next } : b)),
+        prev.map((b, i) => (i === selected ? { ...b, ...nextBox } : b)),
       );
       setOriginalBoxes((prev) =>
-        prev.map((b, i) => (i === selected ? { ...b, ...next } : b)),
+        prev.map((b, i) => (i === selected ? { ...b, ...nextBox } : b)),
+      );
+      setCustomBoxes((prev) =>
+        prev
+          ? prev.map((b, i) => (i === selected ? { ...b, ...nextBox } : b))
+          : prev,
       );
     },
     onReplaceSelected: handleReplaceSelected,
@@ -786,6 +832,43 @@ async function clearRegion(
   ctx.clearRect(box.x, box.y, box.w, box.h);
   const url = canvas.toDataURL("image/png");
   return imageFromDataUrl(url);
+}
+
+function isBoxInsideImage(box: ComponentBox, img: HTMLImageElement): boolean {
+  return (
+    box.x >= 0 &&
+    box.y >= 0 &&
+    box.w > 0 &&
+    box.h > 0 &&
+    box.x + box.w <= img.width &&
+    box.y + box.h <= img.height
+  );
+}
+
+async function transformImageRegion(
+  img: HTMLImageElement,
+  from: ComponentBox,
+  to: ComponentBox,
+): Promise<HTMLImageElement | null> {
+  if (!isBoxInsideImage(from, img) || !isBoxInsideImage(to, img)) return null;
+
+  const source = document.createElement("canvas");
+  source.width = from.w;
+  source.height = from.h;
+  const sourceCtx = source.getContext("2d");
+  if (!sourceCtx) return null;
+  sourceCtx.drawImage(img, from.x, from.y, from.w, from.h, 0, 0, from.w, from.h);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0);
+  ctx.clearRect(from.x, from.y, from.w, from.h);
+  ctx.drawImage(source, 0, 0, from.w, from.h, to.x, to.y, to.w, to.h);
+
+  return await imageFromCanvas(canvas);
 }
 
 async function imageFromCanvas(canvas: HTMLCanvasElement): Promise<HTMLImageElement> {

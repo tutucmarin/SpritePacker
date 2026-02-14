@@ -42,7 +42,7 @@ type Props = {
   // sprite info
   selectedBox: ComponentBox | null;
   selectedIndex: number | null;
-  onUpdate: (next: ComponentBox) => void;
+  onUpdate: (next: ComponentBox, applyToImage?: boolean) => Promise<void> | void;
   onDelete: () => void;
   onReplace: (file: File) => void;
   // download
