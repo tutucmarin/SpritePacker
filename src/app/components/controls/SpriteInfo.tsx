@@ -9,7 +9,13 @@ type Props = {
   onReplace: (file: File) => void;
 };
 
-export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete, onReplace }: Props) {
+export function SpriteInfo({
+  box,
+  selectedIndex,
+  onUpdate,
+  onDelete,
+  onReplace,
+}: Props) {
   const [name, setName] = useState("");
   const [x, setX] = useState(0);
   const [y, setY] = useState(0);
@@ -20,7 +26,9 @@ export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete, onReplace }
   useEffect(() => {
     if (!box) return;
     const fallback =
-      box.name && box.name.trim().length ? box.name : `sprite-${(selectedIndex ?? 0) + 1}`;
+      box.name && box.name.trim().length
+        ? box.name
+        : `sprite-${(selectedIndex ?? 0) + 1}`;
     setName(fallback);
     setX(box.x);
     setY(box.y);
@@ -33,7 +41,11 @@ export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete, onReplace }
       <h3>Sprite Info</h3>
       {box ? (
         <>
-          <div className="toolbar" style={{ marginBottom: 6, flexWrap: "wrap" }}>
+          <div
+            className="toolbar"
+            style={{ marginBottom: 6, alignItems: "center" }}
+          >
+            <div className="help">#{(selectedIndex ?? 0) + 1}</div>
             <input
               type="text"
               value={name}
@@ -48,29 +60,6 @@ export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete, onReplace }
             <NumberInput label="w" value={w} onChange={setW} min={1} />
             <NumberInput label="h" value={h} onChange={setH} min={1} />
           </div>
-          <div className="help" style={{ marginBottom: 8 }}>
-            #{(selectedIndex ?? 0) + 1}
-          </div>
-          <div className="toolbar" style={{ gap: 8 }}>
-            <button
-              className="secondary"
-              onClick={() =>
-                onUpdate({
-                  ...box,
-                  name,
-                  x: clampInt(x),
-                  y: clampInt(y),
-                  w: Math.max(1, clampInt(w)),
-                  h: Math.max(1, clampInt(h)),
-                })
-              }
-            >
-              Save
-            </button>
-            <button className="secondary btn-icon" onClick={onDelete}>
-              Delete
-            </button>
-          </div>
           <div
             className="toolbar"
             style={{
@@ -80,9 +69,15 @@ export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete, onReplace }
               justifyContent: "space-between",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: 2,
+              }}
+            >
               <label className="small">Replace</label>
-              <div className="help">Size must match on width or height (±1px).</div>
             </div>
             <input
               ref={fileInputRef}
@@ -95,9 +90,35 @@ export function SpriteInfo({ box, selectedIndex, onUpdate, onDelete, onReplace }
                 if (e.target) e.target.value = "";
               }}
             />
-            <button className="secondary btn-icon" onClick={() => fileInputRef.current?.click()}>
+            <button
+              className="secondary btn-icon"
+              style={{ marginLeft: "auto" }}
+              title="Size must match on width or height (±1px)."
+              aria-label="Upload replacement sprite (size must match on width or height, plus or minus one pixel)"
+              onClick={() => fileInputRef.current?.click()}
+            >
               Upload
             </button>
+            <div className="toolbar" style={{ gap: 8, marginTop: 22 }}>
+              <button
+                className="secondary"
+                onClick={() =>
+                  onUpdate({
+                    ...box,
+                    name,
+                    x: clampInt(x),
+                    y: clampInt(y),
+                    w: Math.max(1, clampInt(w)),
+                    h: Math.max(1, clampInt(h)),
+                  })
+                }
+              >
+                Save
+              </button>
+              <button className="secondary btn-icon" onClick={onDelete}>
+                Delete
+              </button>
+            </div>
           </div>
         </>
       ) : (
