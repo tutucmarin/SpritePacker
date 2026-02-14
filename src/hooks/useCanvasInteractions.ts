@@ -29,6 +29,7 @@ export function useCanvasInteractions({
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [draftBox, setDraftBox] = useState<ComponentBox | null>(null);
   const MIN_DRAW = 6;
 
   const toImgPoint = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -46,6 +47,7 @@ export function useCanvasInteractions({
     actionRef.current = null;
     startPtRef.current = null;
     startBoxRef.current = null;
+    setDraftBox(null);
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -69,6 +71,7 @@ export function useCanvasInteractions({
       if (hit >= 0) onSelect(selected === hit ? null : hit);
       return;
     }
+    setDraftBox(null);
     if (hit >= 0) {
       onSelect(selected === hit ? null : hit);
       startPtRef.current = pt;
@@ -78,6 +81,7 @@ export function useCanvasInteractions({
       onSelect(null);
       startPtRef.current = pt;
       startBoxRef.current = { x: pt.x, y: pt.y, w: 0, h: 0 };
+      setDraftBox({ x: pt.x, y: pt.y, w: 1, h: 1 });
       actionRef.current = "draw";
     }
   };
@@ -107,6 +111,19 @@ export function useCanvasInteractions({
             : b,
         ),
       );
+      return;
+    }
+    if (actionRef.current === "draw") {
+      const x1 = Math.min(startBox.x, pt.x);
+      const y1 = Math.min(startBox.y, pt.y);
+      const x2 = Math.max(startBox.x, pt.x);
+      const y2 = Math.max(startBox.y, pt.y);
+      setDraftBox({
+        x: x1,
+        y: y1,
+        w: Math.max(1, x2 - x1),
+        h: Math.max(1, y2 - y1),
+      });
     }
   };
 
@@ -162,6 +179,7 @@ export function useCanvasInteractions({
     zoom,
     pan,
     isPanning,
+    draftBox,
     overlayHandlers: {
       onPointerDown,
       onPointerMove,
