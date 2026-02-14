@@ -118,7 +118,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
   );
   const [cclTol, setCclTol] = useState(16);
   const [downloadMode, setDownloadMode] = useState<"sprites" | "atlas">(
-    "sprites",
+    "atlas",
   );
   const [projectName, setProjectName] = useState("project");
   const [packerMode, setPackerMode] = useState<
@@ -430,8 +430,10 @@ export function useSpritePacker(): UseSpritePackerReturn {
       );
       return;
     }
-    if (target.x + nextImg.width > (img?.width ?? 0) ||
-        target.y + nextImg.height > (img?.height ?? 0)) {
+    if (
+      target.x + nextImg.width > (img?.width ?? 0) ||
+      target.y + nextImg.height > (img?.height ?? 0)
+    ) {
       alert("Replacement image does not fit inside the atlas bounds.");
       return;
     }
@@ -511,6 +513,8 @@ export function useSpritePacker(): UseSpritePackerReturn {
 
   const downloadAtlasZip = async () => {
     if (!img || !boxes.length) return;
+    const baseName = safeProjectName(projectName);
+    const imageName = `${baseName}.png`;
     const zip = new JSZip();
     const imgCanvas = document.createElement("canvas");
     imgCanvas.width = img.width;
@@ -518,7 +522,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
     const ctx = imgCanvas.getContext("2d")!;
     ctx.drawImage(img, 0, 0);
     const imgBlob = await toBlob(imgCanvas, "image/png");
-    zip.file(`${safeProjectName(projectName)}-atlas.png`, imgBlob);
+    zip.file(imageName, imgBlob);
     const ordered = orderBoxes(boxes);
     const frames = ordered.map((b, i) => ({
       filename: (b.name && b.name.trim()) || `sprite-${i + 1}`,
@@ -531,24 +535,21 @@ export function useSpritePacker(): UseSpritePackerReturn {
     const meta = {
       app: "{http://spritepacker.app/}",
       version: "SpritePacker v.1.0.0",
-      image: `${safeProjectName(projectName)}-atlas.png`,
+      image: imageName,
       size: { w: img.width, h: img.height },
       scale: 1,
     };
     if (jsonFormat === "unity") {
       const atlasText = buildUnityAtlas(frames, meta);
-      zip.file(`${safeProjectName(projectName)}-atlas.atlas`, atlasText);
+      zip.file(`${baseName}.atlas`, atlasText);
     } else {
       const payload = buildPayloadForFormat(jsonFormat, frames, meta);
       const ext = jsonFormat === "tpsheet" ? "tpsheet" : "json";
-      const name =
-        jsonFormat === "tpsheet"
-          ? `${safeProjectName(projectName)}-atlas.${ext}`
-          : "sprites.json";
+      const name = `${baseName}.${ext}`;
       zip.file(name, JSON.stringify(payload, null, 2));
     }
     const content = await zip.generateAsync({ type: "blob" });
-    triggerDownload(content, `${safeProjectName(projectName)}-atlas.zip`);
+    triggerDownload(content, `${baseName}.zip`);
   };
 
   const handlePackerChange = async (
@@ -712,8 +713,13 @@ function parseUnityAtlas(text: string): ComponentBox[] {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const boxes: ComponentBox[] = [];
   let pageSeen = false;
-  let current: { name: string; x: number; y: number; w: number; h: number } | null =
-    null;
+  let current: {
+    name: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null = null;
 
   const flush = () => {
     if (current && current.w > 0 && current.h > 0) {
@@ -857,7 +863,17 @@ async function transformImageRegion(
   source.height = from.h;
   const sourceCtx = source.getContext("2d");
   if (!sourceCtx) return null;
-  sourceCtx.drawImage(img, from.x, from.y, from.w, from.h, 0, 0, from.w, from.h);
+  sourceCtx.drawImage(
+    img,
+    from.x,
+    from.y,
+    from.w,
+    from.h,
+    0,
+    0,
+    from.w,
+    from.h,
+  );
 
   const canvas = document.createElement("canvas");
   canvas.width = img.width;
@@ -871,7 +887,9 @@ async function transformImageRegion(
   return await imageFromCanvas(canvas);
 }
 
-async function imageFromCanvas(canvas: HTMLCanvasElement): Promise<HTMLImageElement> {
+async function imageFromCanvas(
+  canvas: HTMLCanvasElement,
+): Promise<HTMLImageElement> {
   const url = canvas.toDataURL("image/png");
   return imageFromDataUrl(url);
 }
