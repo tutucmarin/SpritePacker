@@ -69,6 +69,38 @@
   flex-direction: column;
   gap: 6px;
 }
+.sprite-search {
+  position: relative;
+  margin-bottom: 10px;
+}
+.sprite-search input {
+  width: 100%;
+  padding-right: 28px;
+}
+button.sprite-search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+button.sprite-search-clear:not(:disabled):hover {
+  background: #334155;
+  color: #e5e7eb;
+}
+button.sprite-search-clear:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .sprite-item {
   padding: 8px;
   border: 1px solid #263057;
@@ -87,8 +119,7 @@
 .sprite-index {
   color: #94a3b8;
   font-size: 12px;
-  width: 12px;
-  text-align: center;
+  text-align: end;
 }
 .sprite-name {
   flex: 1;
