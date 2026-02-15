@@ -94,7 +94,7 @@ export function ControlsPanel(props: Props) {
   } = props;
 
   return (
-    <div className="panel">
+    <div className="panel controls-panel">
       <h2>Controls</h2>
       <ProjectSection
         projectName={projectName}
