@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import JSZip from "jszip";
 import { ComponentDetector } from "@/src/lib/component-detector";
-import { currentMimeAndExt } from "@/src/lib/exporter";
 import type { ComponentBox } from "@/src/lib/types";
 import {
   loadImageFromFile,
@@ -46,8 +45,7 @@ type SpritePackerState = {
   atlasHeight: number | null;
   fixedSize: boolean;
   downloadMode: "sprites" | "atlas";
-  fmt: "png" | "jpeg" | "webp";
-  quality: number;
+  archive: boolean;
   bgMode: "auto" | "alpha" | "key" | "custom";
   cclTol: number;
   background: BackgroundMode;
@@ -71,6 +69,7 @@ type SpritePackerActions = {
     applyToImage?: boolean,
   ) => Promise<void>;
   onReplaceSelected: (file: File) => Promise<void>;
+  onFitSelected: () => Promise<void>;
   onPackerChange: (
     mode: "default" | "optimal" | "maxrect",
     spacing?: number,
@@ -84,8 +83,7 @@ type SpritePackerActions = {
   onDeleteDuplicates: (report: DupReport) => Promise<void>;
   onDownload: () => void;
   onDownloadMode: (m: "sprites" | "atlas") => void;
-  onFmt: (f: "png" | "jpeg" | "webp") => void;
-  onQuality: (q: number) => void;
+  onArchive: (v: boolean) => void;
   onBgMode: (v: "auto" | "alpha" | "key" | "custom") => void;
   onTol: (v: number) => void;
   onProjectName: (v: string) => void;
@@ -111,8 +109,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
   const [originalImg, setOriginalImg] = useState<HTMLImageElement | null>(null);
   const [originalBoxes, setOriginalBoxes] = useState<ComponentBox[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
-  const [fmt, setFmt] = useState<"png" | "jpeg" | "webp">("png");
-  const [quality, setQuality] = useState(0.92);
+  const [archive, setArchive] = useState(true);
   const [bgMode, setBgMode] = useState<"auto" | "alpha" | "key" | "custom">(
     "auto",
   );
@@ -259,29 +256,19 @@ export function useSpritePacker(): UseSpritePackerReturn {
     }
   };
 
-  const handleDetect = async () => {
-    if (!img) return;
-    if (bgMode === "custom") {
-      if (!customBoxes || !customBoxes.length) {
-        alert("Upload a custom JSON first.");
-        return;
-      }
-      const cleaned = filterNonOverlapping(customBoxes);
-      setOriginalBoxes(cleaned);
-      setBoxes(cleaned);
-      setSelected(null);
-      await applyRepack(packerMode, spacing, atlasWidth, atlasHeight);
-      return;
-    }
+  const detectBoxesFromImage = (
+    sourceImg: HTMLImageElement,
+    mode: "auto" | "alpha" | "key" | "custom",
+    tol: number,
+  ): ComponentBox[] => {
     const temp = document.createElement("canvas");
-    temp.width = img.width;
-    temp.height = img.height;
+    temp.width = sourceImg.width;
+    temp.height = sourceImg.height;
     const tctx = temp.getContext("2d");
-    if (!tctx) return;
-    tctx.drawImage(img, 0, 0);
-    const data = tctx.getImageData(0, 0, img.width, img.height);
-    const mode = bgMode;
-    const tol = cclTol;
+    if (!tctx) return [];
+    tctx.drawImage(sourceImg, 0, 0);
+    const data = tctx.getImageData(0, 0, sourceImg.width, sourceImg.height);
+
     let mask: Uint8Array;
     if (mode === "alpha") {
       mask = detector.alphaMask(data, 10);
@@ -296,17 +283,62 @@ export function useSpritePacker(): UseSpritePackerReturn {
         mask = detector.colorKeyMask(data, bg, tol);
       }
     }
+
     let comps = detector
-      .findComponents(mask, img.width, img.height)
+      .findComponents(mask, sourceImg.width, sourceImg.height)
       .map((b, i) => ({ ...b, id: i + 1 }));
-    const minDim = Math.min(img.width, img.height);
+    const minDim = Math.min(sourceImg.width, sourceImg.height);
     const minSide = Math.max(2, Math.floor(minDim * 0.003));
     comps = comps.filter((b) => b.w >= minSide && b.h >= minSide);
-    const cleaned = filterNonOverlapping(comps);
-    setOriginalBoxes(cleaned);
-    setBoxes(cleaned);
+    return filterNonOverlapping(comps);
+  };
+
+  const detectAndRepackForMode = async (nextPackerMode = packerMode) => {
+    const sourceImg = originalImg ?? img;
+    if (!sourceImg) return;
+
+    let mode = bgMode;
+    let detected: ComponentBox[];
+    if (mode === "custom") {
+      if (customBoxes && customBoxes.length) {
+        detected = filterNonOverlapping(customBoxes);
+      } else {
+        mode = "auto";
+        setBgMode("auto");
+        detected = detectBoxesFromImage(sourceImg, mode, cclTol);
+      }
+    } else {
+      detected = detectBoxesFromImage(sourceImg, mode, cclTol);
+    }
+
+    if (!detected.length) {
+      alert("No sprites detected.");
+      return;
+    }
+
+    const repacked = await repackSprites(
+      nextPackerMode,
+      sourceImg,
+      detected,
+      spacing,
+      fixedSize ? atlasWidth : null,
+      fixedSize ? atlasHeight : null,
+    );
+    if (!repacked) return;
+
+    setOriginalImg(sourceImg);
+    setOriginalBoxes(detected);
+    setImg(repacked.img);
+    setBoxes(repacked.boxes);
     setSelected(null);
-    await applyRepack(packerMode, spacing, atlasWidth, atlasHeight);
+    if (!fixedSize) {
+      setAtlasWidth(repacked.img.width);
+      setAtlasHeight(repacked.img.height);
+    }
+  };
+
+  const handleDetect = async () => {
+    await detectAndRepackForMode(packerMode);
   };
 
   const handleCustomJson = async (file?: File) => {
@@ -328,7 +360,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       setCustomBoxes(next);
       setSelected(null);
       try {
-        await applyRepack(packerMode, spacing, atlasWidth, atlasHeight);
+        await applyRepackWithBoxes(next);
       } catch (err) {
         console.error(err);
       }
@@ -479,6 +511,39 @@ export function useSpritePacker(): UseSpritePackerReturn {
     );
   };
 
+  const handleFitSelected = async () => {
+    if (selected == null || !boxes.length || !img) return;
+    const target = boxes[selected];
+    const fitted = detectFittedBoundsForBox(
+      img,
+      target,
+      detector,
+      bgMode,
+      cclTol,
+    );
+    if (!fitted) {
+      alert("Could not detect sprite bounds for Fit.");
+      return;
+    }
+    const nextBox: ComponentBox = { ...target, ...fitted };
+    if (!isBoxInsideImage(nextBox, img)) {
+      alert("Fitted sprite bounds must stay inside the atlas image.");
+      return;
+    }
+    if (originalImg && !isBoxInsideImage(nextBox, originalImg)) {
+      alert("Fitted sprite bounds must stay inside the atlas image.");
+      return;
+    }
+
+    setBoxes((prev) => prev.map((b, i) => (i === selected ? nextBox : b)));
+    setOriginalBoxes((prev) =>
+      prev.map((b, i) => (i === selected ? nextBox : b)),
+    );
+    setCustomBoxes((prev) =>
+      prev ? prev.map((b, i) => (i === selected ? nextBox : b)) : prev,
+    );
+  };
+
   const handleClear = () => {
     setBoxes([]);
     setOriginalBoxes([]);
@@ -493,8 +558,6 @@ export function useSpritePacker(): UseSpritePackerReturn {
     if (!img || !boxes.length) return;
     const zip = new JSZip();
     const ordered = orderBoxes(boxes);
-    const mime = currentMimeAndExt(fmt);
-    const q = mime.lossy ? Math.max(0, Math.min(1, quality)) : undefined;
     const tmp = document.createElement("canvas");
     const tctx = tmp.getContext("2d")!;
     for (let i = 0; i < ordered.length; i++) {
@@ -504,25 +567,40 @@ export function useSpritePacker(): UseSpritePackerReturn {
       tctx.clearRect(0, 0, b.w, b.h);
       tctx.drawImage(img, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
       const name = (b.name && b.name.trim()) || `sprite-${i + 1}`;
-      const blob = await toBlob(tmp, mime.mime, q);
-      zip.file(`${name}.${mime.ext === "jpg" ? "jpg" : mime.ext}`, blob);
+      const blob = await toBlob(tmp, "image/png");
+      zip.file(`${name}.png`, blob);
     }
     const content = await zip.generateAsync({ type: "blob" });
     triggerDownload(content, `${safeProjectName(projectName)}-sprites.zip`);
   };
 
-  const downloadAtlasZip = async () => {
+  const downloadSpritesFiles = async () => {
     if (!img || !boxes.length) return;
+    const ordered = orderBoxes(boxes);
+    const tmp = document.createElement("canvas");
+    const tctx = tmp.getContext("2d")!;
+    for (let i = 0; i < ordered.length; i++) {
+      const b = ordered[i];
+      tmp.width = b.w;
+      tmp.height = b.h;
+      tctx.clearRect(0, 0, b.w, b.h);
+      tctx.drawImage(img, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
+      const name = (b.name && b.name.trim()) || `sprite-${i + 1}`;
+      const blob = await toBlob(tmp, "image/png");
+      triggerDownload(blob, `${name}.png`);
+    }
+  };
+
+  const buildAtlasArtifacts = async () => {
+    if (!img || !boxes.length) return null;
     const baseName = safeProjectName(projectName);
     const imageName = `${baseName}.png`;
-    const zip = new JSZip();
     const imgCanvas = document.createElement("canvas");
     imgCanvas.width = img.width;
     imgCanvas.height = img.height;
     const ctx = imgCanvas.getContext("2d")!;
     ctx.drawImage(img, 0, 0);
-    const imgBlob = await toBlob(imgCanvas, "image/png");
-    zip.file(imageName, imgBlob);
+    const imageBlob = await toBlob(imgCanvas, "image/png");
     const ordered = orderBoxes(boxes);
     const frames = ordered.map((b, i) => ({
       filename: (b.name && b.name.trim()) || `sprite-${i + 1}`,
@@ -540,16 +618,40 @@ export function useSpritePacker(): UseSpritePackerReturn {
       scale: 1,
     };
     if (jsonFormat === "unity") {
-      const atlasText = buildUnityAtlas(frames, meta);
-      zip.file(`${baseName}.atlas`, atlasText);
-    } else {
-      const payload = buildPayloadForFormat(jsonFormat, frames, meta);
-      const ext = jsonFormat === "tpsheet" ? "tpsheet" : "json";
-      const name = `${baseName}.${ext}`;
-      zip.file(name, JSON.stringify(payload, null, 2));
+      const dataName = `${baseName}.atlas`;
+      const dataBlob = new Blob([buildUnityAtlas(frames, meta)], {
+        type: "text/plain;charset=utf-8",
+      });
+      return { baseName, imageName, imageBlob, dataName, dataBlob };
     }
+    const payload = buildPayloadForFormat(jsonFormat, frames, meta);
+    const ext = jsonFormat === "tpsheet" ? "tpsheet" : "json";
+    const dataName = `${baseName}.${ext}`;
+    const dataBlob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    return { baseName, imageName, imageBlob, dataName, dataBlob };
+  };
+
+  const downloadAtlasZip = async () => {
+    const artifacts = await buildAtlasArtifacts();
+    if (!artifacts) return;
+    const { baseName, imageName, imageBlob, dataName, dataBlob } = artifacts;
+    const zip = new JSZip();
+    zip.file(imageName, imageBlob);
+    zip.file(dataName, dataBlob);
     const content = await zip.generateAsync({ type: "blob" });
     triggerDownload(content, `${baseName}.zip`);
+  };
+
+  const downloadAtlasFiles = async () => {
+    const artifacts = await buildAtlasArtifacts();
+    if (!artifacts) return;
+    const { imageName, imageBlob, dataName, dataBlob } = artifacts;
+    triggerDownload(imageBlob, imageName);
+    setTimeout(() => {
+      triggerDownload(dataBlob, dataName);
+    }, 60);
   };
 
   const handlePackerChange = async (
@@ -557,7 +659,11 @@ export function useSpritePacker(): UseSpritePackerReturn {
     pad = spacing,
   ) => {
     setPackerMode(mode);
-    await applyRepack(mode, pad, atlasWidth, atlasHeight);
+    if (pad !== spacing) {
+      await applyRepack(mode, pad, atlasWidth, atlasHeight);
+      return;
+    }
+    await detectAndRepackForMode(mode);
   };
 
   const onAtlasWidthChange = async (v: number | null) => {
@@ -588,8 +694,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
     atlasHeight,
     fixedSize,
     downloadMode,
-    fmt,
-    quality,
+    archive,
     bgMode,
     cclTol,
     background,
@@ -660,6 +765,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       );
     },
     onReplaceSelected: handleReplaceSelected,
+    onFitSelected: handleFitSelected,
     onPackerChange: handlePackerChange,
     onAtlasWidth: onAtlasWidthChange,
     onAtlasHeight: onAtlasHeightChange,
@@ -668,17 +774,22 @@ export function useSpritePacker(): UseSpritePackerReturn {
     onSpacing: async (v: number) => {
       const next = Number.isNaN(v) ? 5 : Math.max(5, v);
       setSpacing(next);
-      await handlePackerChange(packerMode, next);
+      await applyRepack(packerMode, next, atlasWidth, atlasHeight);
     },
     onDetectDuplicates: detectDuplicates,
     onDeleteDuplicates: deleteDuplicates,
     onDownload: () => {
-      if (downloadMode === "sprites") downloadSpritesZip();
-      else downloadAtlasZip();
+      if (downloadMode === "sprites") {
+        if (archive) downloadSpritesZip();
+        else downloadSpritesFiles();
+      } else if (archive) {
+        downloadAtlasZip();
+      } else {
+        downloadAtlasFiles();
+      }
     },
     onDownloadMode: setDownloadMode,
-    onFmt: setFmt,
-    onQuality: setQuality,
+    onArchive: setArchive,
     onBgMode: setBgMode,
     onTol: setCclTol,
     onProjectName: setProjectName,
@@ -824,6 +935,80 @@ function parseCustomSprites(data: any, format: JsonFormat): ComponentBox[] {
       .filter((b) => b.w > 0 && b.h > 0);
   }
   return [];
+}
+
+function detectFittedBoundsForBox(
+  img: HTMLImageElement,
+  target: ComponentBox,
+  detector: ComponentDetector,
+  mode: "auto" | "alpha" | "key" | "custom",
+  tol: number,
+): Pick<ComponentBox, "x" | "y" | "w" | "h"> | null {
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, img.width, img.height);
+
+  let mask: Uint8Array;
+  if (mode === "alpha") {
+    mask = detector.alphaMask(data, 10);
+  } else if (mode === "key") {
+    const bg = detector.sampleBackground(data);
+    mask = detector.colorKeyMask(data, bg, tol);
+  } else {
+    const hasAlpha = detector.estimateHasAlpha(data);
+    if (hasAlpha) {
+      mask = detector.alphaMask(data, 10);
+    } else {
+      const bg = detector.sampleBackground(data);
+      mask = detector.colorKeyMask(data, bg, tol);
+    }
+  }
+
+  const components = detector.findComponents(mask, img.width, img.height);
+  if (!components.length) return null;
+
+  let best: ComponentBox | null = null;
+  let bestOverlap = 0;
+  let bestCenterDist = Infinity;
+  const centerX = target.x + target.w / 2;
+  const centerY = target.y + target.h / 2;
+
+  for (const comp of components) {
+    const overlap = intersectionArea(target, comp);
+    if (overlap <= 0) continue;
+    const compCenterX = comp.x + comp.w / 2;
+    const compCenterY = comp.y + comp.h / 2;
+    const centerDist =
+      (compCenterX - centerX) * (compCenterX - centerX) +
+      (compCenterY - centerY) * (compCenterY - centerY);
+    if (
+      !best ||
+      overlap > bestOverlap ||
+      (overlap === bestOverlap && centerDist < bestCenterDist)
+    ) {
+      best = comp;
+      bestOverlap = overlap;
+      bestCenterDist = centerDist;
+    }
+  }
+
+  if (!best) return null;
+  return { x: best.x, y: best.y, w: best.w, h: best.h };
+}
+
+function intersectionArea(a: ComponentBox, b: ComponentBox): number {
+  const x0 = Math.max(a.x, b.x);
+  const y0 = Math.max(a.y, b.y);
+  const x1 = Math.min(a.x + a.w, b.x + b.w);
+  const y1 = Math.min(a.y + a.h, b.y + b.h);
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w <= 0 || h <= 0) return 0;
+  return w * h;
 }
 
 async function clearRegion(

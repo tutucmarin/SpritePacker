@@ -30,8 +30,7 @@ export default function Page() {
     atlasHeight,
     fixedSize,
     downloadMode,
-    fmt,
-    quality,
+    archive,
     bgMode,
     cclTol,
     background,
@@ -101,12 +100,11 @@ export default function Page() {
           onUpdate={actions.onUpdateSelected}
           onDelete={actions.onDeleteSelected}
           onReplace={actions.onReplaceSelected}
+          onFit={actions.onFitSelected}
           downloadMode={downloadMode}
           onDownloadMode={actions.onDownloadMode}
-          fmt={fmt}
-          quality={quality}
-          onFmt={actions.onFmt}
-          onQuality={actions.onQuality}
+          archive={archive}
+          onArchive={actions.onArchive}
           onDownload={actions.onDownload}
         />
       </div>
