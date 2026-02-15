@@ -79,7 +79,7 @@ export function SpritesPanel({
       <div className="scroll sprite-list">
         {boxes.length === 0 && (
           <div className="help">
-            No sprites yet. Load an image and click Auto-detect.
+            No sprites yet. Load an image and click Detect.
           </div>
         )}
         {boxes.length > 0 && filteredBoxes.length === 0 && (

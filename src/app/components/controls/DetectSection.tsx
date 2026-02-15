@@ -67,7 +67,7 @@ export function DetectSection({
         <span className="label">Detect</span>
         <div className="control">
           <button className="secondary btn-icon" onClick={onDetect}>
-            Auto-detect
+            Detect
           </button>
         </div>
       </div>

@@ -258,17 +258,19 @@ export function useSpritePacker(): UseSpritePackerReturn {
 
   const handleDetect = async () => {
     if (!img) return;
-    if (bgMode === "custom") {
+    let mode = bgMode;
+    if (mode === "custom") {
       if (!customBoxes || !customBoxes.length) {
-        alert("Upload a custom JSON first.");
+        mode = "auto";
+        setBgMode("auto");
+      } else {
+        const cleaned = filterNonOverlapping(customBoxes);
+        setOriginalBoxes(cleaned);
+        setBoxes(cleaned);
+        setSelected(null);
+        await applyRepackWithBoxes(cleaned);
         return;
       }
-      const cleaned = filterNonOverlapping(customBoxes);
-      setOriginalBoxes(cleaned);
-      setBoxes(cleaned);
-      setSelected(null);
-      await applyRepack(packerMode, spacing, atlasWidth, atlasHeight);
-      return;
     }
     const temp = document.createElement("canvas");
     temp.width = img.width;
@@ -277,7 +279,6 @@ export function useSpritePacker(): UseSpritePackerReturn {
     if (!tctx) return;
     tctx.drawImage(img, 0, 0);
     const data = tctx.getImageData(0, 0, img.width, img.height);
-    const mode = bgMode;
     const tol = cclTol;
     let mask: Uint8Array;
     if (mode === "alpha") {
@@ -325,7 +326,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       setCustomBoxes(next);
       setSelected(null);
       try {
-        await applyRepack(packerMode, spacing, atlasWidth, atlasHeight);
+        await applyRepackWithBoxes(next);
       } catch (err) {
         console.error(err);
       }
