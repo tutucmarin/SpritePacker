@@ -71,6 +71,7 @@ type SpritePackerActions = {
     applyToImage?: boolean,
   ) => Promise<void>;
   onReplaceSelected: (file: File) => Promise<void>;
+  onFitSelected: () => Promise<void>;
   onPackerChange: (
     mode: "default" | "optimal" | "maxrect",
     spacing?: number,
@@ -479,6 +480,39 @@ export function useSpritePacker(): UseSpritePackerReturn {
     );
   };
 
+  const handleFitSelected = async () => {
+    if (selected == null || !boxes.length || !img) return;
+    const target = boxes[selected];
+    const fitted = detectFittedBoundsForBox(
+      img,
+      target,
+      detector,
+      bgMode,
+      cclTol,
+    );
+    if (!fitted) {
+      alert("Could not detect sprite bounds for Fit.");
+      return;
+    }
+    const nextBox: ComponentBox = { ...target, ...fitted };
+    if (!isBoxInsideImage(nextBox, img)) {
+      alert("Fitted sprite bounds must stay inside the atlas image.");
+      return;
+    }
+    if (originalImg && !isBoxInsideImage(nextBox, originalImg)) {
+      alert("Fitted sprite bounds must stay inside the atlas image.");
+      return;
+    }
+
+    setBoxes((prev) => prev.map((b, i) => (i === selected ? nextBox : b)));
+    setOriginalBoxes((prev) =>
+      prev.map((b, i) => (i === selected ? nextBox : b)),
+    );
+    setCustomBoxes((prev) =>
+      prev ? prev.map((b, i) => (i === selected ? nextBox : b)) : prev,
+    );
+  };
+
   const handleClear = () => {
     setBoxes([]);
     setOriginalBoxes([]);
@@ -660,6 +694,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       );
     },
     onReplaceSelected: handleReplaceSelected,
+    onFitSelected: handleFitSelected,
     onPackerChange: handlePackerChange,
     onAtlasWidth: onAtlasWidthChange,
     onAtlasHeight: onAtlasHeightChange,
@@ -824,6 +859,80 @@ function parseCustomSprites(data: any, format: JsonFormat): ComponentBox[] {
       .filter((b) => b.w > 0 && b.h > 0);
   }
   return [];
+}
+
+function detectFittedBoundsForBox(
+  img: HTMLImageElement,
+  target: ComponentBox,
+  detector: ComponentDetector,
+  mode: "auto" | "alpha" | "key" | "custom",
+  tol: number,
+): Pick<ComponentBox, "x" | "y" | "w" | "h"> | null {
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, img.width, img.height);
+
+  let mask: Uint8Array;
+  if (mode === "alpha") {
+    mask = detector.alphaMask(data, 10);
+  } else if (mode === "key") {
+    const bg = detector.sampleBackground(data);
+    mask = detector.colorKeyMask(data, bg, tol);
+  } else {
+    const hasAlpha = detector.estimateHasAlpha(data);
+    if (hasAlpha) {
+      mask = detector.alphaMask(data, 10);
+    } else {
+      const bg = detector.sampleBackground(data);
+      mask = detector.colorKeyMask(data, bg, tol);
+    }
+  }
+
+  const components = detector.findComponents(mask, img.width, img.height);
+  if (!components.length) return null;
+
+  let best: ComponentBox | null = null;
+  let bestOverlap = 0;
+  let bestCenterDist = Infinity;
+  const centerX = target.x + target.w / 2;
+  const centerY = target.y + target.h / 2;
+
+  for (const comp of components) {
+    const overlap = intersectionArea(target, comp);
+    if (overlap <= 0) continue;
+    const compCenterX = comp.x + comp.w / 2;
+    const compCenterY = comp.y + comp.h / 2;
+    const centerDist =
+      (compCenterX - centerX) * (compCenterX - centerX) +
+      (compCenterY - centerY) * (compCenterY - centerY);
+    if (
+      !best ||
+      overlap > bestOverlap ||
+      (overlap === bestOverlap && centerDist < bestCenterDist)
+    ) {
+      best = comp;
+      bestOverlap = overlap;
+      bestCenterDist = centerDist;
+    }
+  }
+
+  if (!best) return null;
+  return { x: best.x, y: best.y, w: best.w, h: best.h };
+}
+
+function intersectionArea(a: ComponentBox, b: ComponentBox): number {
+  const x0 = Math.max(a.x, b.x);
+  const y0 = Math.max(a.y, b.y);
+  const x1 = Math.min(a.x + a.w, b.x + b.w);
+  const y1 = Math.min(a.y + a.h, b.y + b.h);
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w <= 0 || h <= 0) return 0;
+  return w * h;
 }
 
 async function clearRegion(

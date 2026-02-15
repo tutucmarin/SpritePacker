@@ -101,6 +101,7 @@ export default function Page() {
           onUpdate={actions.onUpdateSelected}
           onDelete={actions.onDeleteSelected}
           onReplace={actions.onReplaceSelected}
+          onFit={actions.onFitSelected}
           downloadMode={downloadMode}
           onDownloadMode={actions.onDownloadMode}
           fmt={fmt}

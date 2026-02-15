@@ -45,6 +45,7 @@ type Props = {
   onUpdate: (next: ComponentBox, applyToImage?: boolean) => Promise<void> | void;
   onDelete: () => void;
   onReplace: (file: File) => void;
+  onFit: () => void;
   // download
   downloadMode: "sprites" | "atlas";
   onDownloadMode: (m: "sprites" | "atlas") => void;
@@ -86,6 +87,7 @@ export function ControlsPanel(props: Props) {
     onUpdate,
     onDelete,
     onReplace,
+    onFit,
     downloadMode,
     onDownloadMode,
     fmt,
@@ -136,6 +138,7 @@ export function ControlsPanel(props: Props) {
           onUpdate={onUpdate}
           onDelete={onDelete}
           onReplace={onReplace}
+          onFit={onFit}
         />
       )}
 

@@ -10,6 +10,7 @@ type Props = {
   ) => Promise<void> | void;
   onDelete: () => void;
   onReplace: (file: File) => void;
+  onFit: () => void;
 };
 
 export function SpriteInfo({
@@ -18,6 +19,7 @@ export function SpriteInfo({
   onUpdate,
   onDelete,
   onReplace,
+  onFit,
 }: Props) {
   const [name, setName] = useState("");
   const [x, setX] = useState(0);
@@ -120,6 +122,35 @@ export function SpriteInfo({
               onClick={() => fileInputRef.current?.click()}
             >
               Upload
+            </button>
+          </div>
+          <div
+            className="toolbar"
+            style={{
+              gap: 8,
+              marginTop: 8,
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: 2,
+              }}
+            >
+              <label className="small">Fit</label>
+            </div>
+            <button
+              className="secondary btn-icon"
+              style={{ marginLeft: "auto" }}
+              title="Set sprite width and height to match the selected image."
+              aria-label="Fit sprite size to selected image"
+              onClick={onFit}
+            >
+              Fit
             </button>
           </div>
           <div className="toolbar" style={{ gap: 8, marginTop: 10 }}>
