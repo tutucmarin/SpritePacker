@@ -113,12 +113,13 @@ export function CanvasStage({
           className="base"
           style={{
             position: "absolute",
-            inset: 0,
+            left: "50%",
+            top: "50%",
             width: displaySize?.w ? `${displaySize.w}px` : undefined,
             height: displaySize?.h ? `${displaySize.h}px` : undefined,
             zIndex: 1,
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-            transformOrigin: "top left",
+            transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "center center",
           }}
         />
         <canvas
@@ -126,14 +127,15 @@ export function CanvasStage({
           className="overlay"
           style={{
             position: "absolute",
-            inset: 0,
+            left: "50%",
+            top: "50%",
             width: displaySize?.w ? `${displaySize.w}px` : undefined,
             height: displaySize?.h ? `${displaySize.h}px` : undefined,
             background: "transparent",
             pointerEvents: editMode ? "auto" : "none",
             zIndex: 2,
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-            transformOrigin: "top left",
+            transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "center center",
           }}
           {...overlayHandlers}
         />
