@@ -256,30 +256,19 @@ export function useSpritePacker(): UseSpritePackerReturn {
     }
   };
 
-  const handleDetect = async () => {
-    if (!img) return;
-    let mode = bgMode;
-    if (mode === "custom") {
-      if (!customBoxes || !customBoxes.length) {
-        mode = "auto";
-        setBgMode("auto");
-      } else {
-        const cleaned = filterNonOverlapping(customBoxes);
-        setOriginalBoxes(cleaned);
-        setBoxes(cleaned);
-        setSelected(null);
-        await applyRepackWithBoxes(cleaned);
-        return;
-      }
-    }
+  const detectBoxesFromImage = (
+    sourceImg: HTMLImageElement,
+    mode: "auto" | "alpha" | "key" | "custom",
+    tol: number,
+  ): ComponentBox[] => {
     const temp = document.createElement("canvas");
-    temp.width = img.width;
-    temp.height = img.height;
+    temp.width = sourceImg.width;
+    temp.height = sourceImg.height;
     const tctx = temp.getContext("2d");
-    if (!tctx) return;
-    tctx.drawImage(img, 0, 0);
-    const data = tctx.getImageData(0, 0, img.width, img.height);
-    const tol = cclTol;
+    if (!tctx) return [];
+    tctx.drawImage(sourceImg, 0, 0);
+    const data = tctx.getImageData(0, 0, sourceImg.width, sourceImg.height);
+
     let mask: Uint8Array;
     if (mode === "alpha") {
       mask = detector.alphaMask(data, 10);
@@ -294,17 +283,62 @@ export function useSpritePacker(): UseSpritePackerReturn {
         mask = detector.colorKeyMask(data, bg, tol);
       }
     }
+
     let comps = detector
-      .findComponents(mask, img.width, img.height)
+      .findComponents(mask, sourceImg.width, sourceImg.height)
       .map((b, i) => ({ ...b, id: i + 1 }));
-    const minDim = Math.min(img.width, img.height);
+    const minDim = Math.min(sourceImg.width, sourceImg.height);
     const minSide = Math.max(2, Math.floor(minDim * 0.003));
     comps = comps.filter((b) => b.w >= minSide && b.h >= minSide);
-    const cleaned = filterNonOverlapping(comps);
-    setOriginalBoxes(cleaned);
-    setBoxes(cleaned);
+    return filterNonOverlapping(comps);
+  };
+
+  const detectAndRepackForMode = async (nextPackerMode = packerMode) => {
+    const sourceImg = originalImg ?? img;
+    if (!sourceImg) return;
+
+    let mode = bgMode;
+    let detected: ComponentBox[];
+    if (mode === "custom") {
+      if (customBoxes && customBoxes.length) {
+        detected = filterNonOverlapping(customBoxes);
+      } else {
+        mode = "auto";
+        setBgMode("auto");
+        detected = detectBoxesFromImage(sourceImg, mode, cclTol);
+      }
+    } else {
+      detected = detectBoxesFromImage(sourceImg, mode, cclTol);
+    }
+
+    if (!detected.length) {
+      alert("No sprites detected.");
+      return;
+    }
+
+    const repacked = await repackSprites(
+      nextPackerMode,
+      sourceImg,
+      detected,
+      spacing,
+      fixedSize ? atlasWidth : null,
+      fixedSize ? atlasHeight : null,
+    );
+    if (!repacked) return;
+
+    setOriginalImg(sourceImg);
+    setOriginalBoxes(detected);
+    setImg(repacked.img);
+    setBoxes(repacked.boxes);
     setSelected(null);
-    await applyRepack(packerMode, spacing, atlasWidth, atlasHeight);
+    if (!fixedSize) {
+      setAtlasWidth(repacked.img.width);
+      setAtlasHeight(repacked.img.height);
+    }
+  };
+
+  const handleDetect = async () => {
+    await detectAndRepackForMode(packerMode);
   };
 
   const handleCustomJson = async (file?: File) => {
@@ -625,7 +659,11 @@ export function useSpritePacker(): UseSpritePackerReturn {
     pad = spacing,
   ) => {
     setPackerMode(mode);
-    await applyRepack(mode, pad, atlasWidth, atlasHeight);
+    if (pad !== spacing) {
+      await applyRepack(mode, pad, atlasWidth, atlasHeight);
+      return;
+    }
+    await detectAndRepackForMode(mode);
   };
 
   const onAtlasWidthChange = async (v: number | null) => {
@@ -736,7 +774,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
     onSpacing: async (v: number) => {
       const next = Number.isNaN(v) ? 5 : Math.max(5, v);
       setSpacing(next);
-      await handlePackerChange(packerMode, next);
+      await applyRepack(packerMode, next, atlasWidth, atlasHeight);
     },
     onDetectDuplicates: detectDuplicates,
     onDeleteDuplicates: deleteDuplicates,
