@@ -59,7 +59,6 @@ export function DetectSection({
             min={0}
             max={64}
             onChange={(e) => onTol(parseInt(e.target.value || "16", 10))}
-            style={{ width: 90 }}
           />
         </div>
       </div>

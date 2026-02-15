@@ -59,13 +59,12 @@ export function ProjectSection({
       <h3>Project</h3>
       <div className="setting-row">
         <span className="label">Project name</span>
-        <div className="control" style={{ width: "60%" }}>
+        <div className="control">
           <input
             type="text"
             value={projectName}
             onChange={(e) => onProjectName(e.target.value)}
             placeholder="project name"
-            style={{ width: "100%" }}
           />
         </div>
       </div>
@@ -90,7 +89,6 @@ export function ProjectSection({
             value={spacing}
             min={5}
             onChange={(e) => onSpacing(parseInt(e.target.value || "0", 10))}
-            style={{ width: 90 }}
           />
         </div>
       </div>
@@ -108,7 +106,6 @@ export function ProjectSection({
                   : parseInt(e.target.value || "0", 10),
               )
             }
-            style={{ width: 90 }}
           />
         </div>
       </div>
@@ -126,7 +123,6 @@ export function ProjectSection({
                   : parseInt(e.target.value || "0", 10),
               )
             }
-            style={{ width: 90 }}
           />
         </div>
       </div>
@@ -164,7 +160,6 @@ export function ProjectSection({
           <select
             value={background}
             onChange={(e) => onBackground(e.target.value as any)}
-            style={{ width: 140 }}
           >
             <option value="transparent">Transparent (grid)</option>
             <option value="clear">Clear Transparent</option>

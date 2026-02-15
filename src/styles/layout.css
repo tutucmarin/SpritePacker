@@ -59,6 +59,78 @@
   overflow-y: auto;
   overflow-x: hidden;
 }
+.controls-panel .section-compact {
+  margin-bottom: 12px;
+}
+.controls-panel .setting-row {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+.controls-panel .setting-row .label {
+  flex: none;
+  color: #cbd5e1;
+  font-size: 12px;
+}
+.controls-panel .setting-row .control {
+  justify-content: flex-start;
+  min-width: 0;
+}
+.controls-panel .setting-row .control > input:not([type="checkbox"]):not(
+    [type="radio"]
+  ),
+.controls-panel .setting-row .control > select,
+.controls-panel .setting-row .control > button,
+.controls-panel .setting-row .control > .button-like {
+  width: 164px;
+  max-width: 100%;
+}
+.controls-panel .setting-row .control > button,
+.controls-panel .setting-row .control > .button-like {
+  justify-content: center;
+}
+.controls-panel .download-mode-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 164px;
+}
+.controls-panel .download-mode-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.controls-panel .sprite-info-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.controls-panel .sprite-bounds {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(72px, 1fr));
+  gap: 6px;
+  width: 164px;
+}
+.controls-panel .sprite-metric {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  font-size: 12px;
+}
+.controls-panel .sprite-metric input {
+  width: 60px;
+}
+.controls-panel .sprite-actions {
+  display: flex;
+  gap: 8px;
+  width: 164px;
+}
+.controls-panel .sprite-actions > button {
+  flex: 1;
+  min-width: 0;
+}
 .panel.fill {
   height: 100%;
   flex: 1;

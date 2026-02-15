@@ -44,65 +44,54 @@ export function SpriteInfo({
 
   return (
     <div className="section-compact">
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "flex-start",
-          gap: 6,
-        }}
-      >
+      <div className="sprite-info-title">
         <h3 style={{ margin: 0 }}>Sprite Info</h3>{" "}
         <span className="help">#{(selectedIndex ?? 0) + 1}</span>
       </div>
 
       {box ? (
         <>
-          <div className="toolbar" style={{ marginBottom: 6 }}>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="sprite name"
-              style={{ flex: 1, minWidth: 0 }}
-            />
-          </div>
-          <div className="toolbar" style={{ gap: 8, flexWrap: "wrap" }}>
-            <NumberInput label="x" value={x} onChange={setX} />
-            <NumberInput label="y" value={y} onChange={setY} />
-            <NumberInput label="w" value={w} onChange={setW} min={1} />
-            <NumberInput label="h" value={h} onChange={setH} min={1} />
-          </div>
-          <div className="toolbar" style={{ marginTop: 8 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div className="setting-row">
+            <span className="label">Name</span>
+            <div className="control">
               <input
-                type="checkbox"
-                checked={applyToImage}
-                onChange={(e) => setApplyToImage(e.target.checked)}
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="sprite name"
               />
-              <span className="help">
-                Apply x/y/w/h changes to image pixels
-              </span>
-            </label>
-          </div>
-          <div
-            className="toolbar"
-            style={{
-              gap: 8,
-              marginTop: 8,
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                gap: 2,
-              }}
-            >
-              <label className="small">Replace</label>
             </div>
+          </div>
+          <div className="setting-row" style={{ marginTop: 8 }}>
+            <span className="label">Position</span>
+            <div className="control sprite-bounds">
+              <NumberInput label="x" value={x} onChange={setX} />
+              <NumberInput label="y" value={y} onChange={setY} />
+            </div>
+          </div>
+          <div className="setting-row" style={{ marginTop: 8 }}>
+            <span className="label">Size</span>
+            <div className="control sprite-bounds">
+              <NumberInput label="w" value={w} onChange={setW} min={1} />
+              <NumberInput label="h" value={h} onChange={setH} min={1} />
+            </div>
+          </div>
+          <div className="setting-row" style={{ marginTop: 8 }}>
+            <span className="label">Apply Image</span>
+            <div className="control">
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={applyToImage}
+                  onChange={(e) => setApplyToImage(e.target.checked)}
+                />
+                <span className="help">Sync sprite pixels</span>
+              </label>
+            </div>
+          </div>
+          <div className="setting-row" style={{ marginTop: 8 }}>
+            <span className="label">Replace</span>
+            <div className="control">
             <input
               ref={fileInputRef}
               type="file"
@@ -114,67 +103,54 @@ export function SpriteInfo({
                 if (e.target) e.target.value = "";
               }}
             />
-            <button
-              className="secondary btn-icon"
-              style={{ marginLeft: "auto" }}
-              title="Size must match on width or height (±1px)."
-              aria-label="Upload replacement sprite (size must match on width or height, plus or minus one pixel)"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              Upload
-            </button>
-          </div>
-          <div
-            className="toolbar"
-            style={{
-              gap: 8,
-              marginTop: 8,
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-start",
-                gap: 2,
-              }}
-            >
-              <label className="small">Fit</label>
+              <button
+                className="secondary btn-icon"
+                title="Size must match on width or height (±1px)."
+                aria-label="Upload replacement sprite (size must match on width or height, plus or minus one pixel)"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Upload
+              </button>
             </div>
-            <button
-              className="secondary btn-icon"
-              style={{ marginLeft: "auto" }}
-              title="Set sprite width and height to match the selected image."
-              aria-label="Fit sprite size to selected image"
-              onClick={onFit}
-            >
-              Fit
-            </button>
           </div>
-          <div className="toolbar" style={{ gap: 8, marginTop: 10 }}>
-            <button
-              className="secondary"
-              onClick={() =>
-                onUpdate(
-                  {
-                    ...box,
-                    name,
-                    x: clampInt(x),
-                    y: clampInt(y),
-                    w: Math.max(1, clampInt(w)),
-                    h: Math.max(1, clampInt(h)),
-                  },
-                  applyToImage,
-                )
-              }
-            >
-              Apply
-            </button>
-            <button className="danger btn-icon" onClick={onDelete}>
-              Delete
-            </button>
+          <div className="setting-row" style={{ marginTop: 8 }}>
+            <span className="label">Fit</span>
+            <div className="control">
+              <button
+                className="secondary btn-icon"
+                title="Set sprite width and height to match the selected image."
+                aria-label="Fit sprite size to selected image"
+                onClick={onFit}
+              >
+                Fit
+              </button>
+            </div>
+          </div>
+          <div className="setting-row" style={{ marginTop: 10 }}>
+            <span className="label">Actions</span>
+            <div className="control sprite-actions">
+              <button
+                className="secondary"
+                onClick={() =>
+                  onUpdate(
+                    {
+                      ...box,
+                      name,
+                      x: clampInt(x),
+                      y: clampInt(y),
+                      w: Math.max(1, clampInt(w)),
+                      h: Math.max(1, clampInt(h)),
+                    },
+                    applyToImage,
+                  )
+                }
+              >
+                Apply
+              </button>
+              <button className="danger btn-icon" onClick={onDelete}>
+                Delete
+              </button>
+            </div>
           </div>
         </>
       ) : (
@@ -196,14 +172,13 @@ function NumberInput({
   min?: number;
 }) {
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+    <label className="sprite-metric">
       {label}
       <input
         type="number"
         value={value}
         min={min}
         onChange={(e) => onChange(parseInt(e.target.value || "0", 10))}
-        style={{ width: 80 }}
       />
     </label>
   );
