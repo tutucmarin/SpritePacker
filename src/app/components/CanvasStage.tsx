@@ -42,6 +42,7 @@ export function CanvasStage({
       onMoveBox,
       onAddBox,
     });
+  const showReset = Math.abs(zoom - 1) > 0.001;
 
   // draw image and overlay
   useEffect(() => {
@@ -136,13 +137,15 @@ export function CanvasStage({
           }}
           {...overlayHandlers}
         />
-        <div className="zoom-hud">
-          <span className="icon">🔍</span>
-          <span>{Math.round(zoom * 100)}%</span>
-          <button className="secondary tiny" onClick={resetZoom}>
-            Reset
-          </button>
-        </div>
+        {showReset && (
+          <div className="zoom-hud">
+            <span className="icon">🔍</span>
+            <span>{Math.round(zoom * 100)}%</span>
+            <button className="secondary tiny" onClick={resetZoom}>
+              Reset
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
