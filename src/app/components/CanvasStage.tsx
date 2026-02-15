@@ -101,6 +101,47 @@ export function CanvasStage({
     }
   }, [editMode, img, overlayRef]);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!editMode || selected == null || !img) return;
+
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      let dx = 0;
+      let dy = 0;
+      if (e.key === "ArrowLeft") dx = -1;
+      else if (e.key === "ArrowRight") dx = 1;
+      else if (e.key === "ArrowUp") dy = -1;
+      else if (e.key === "ArrowDown") dy = 1;
+      else return;
+
+      e.preventDefault();
+      onMoveBox((prev) =>
+        prev.map((b, i) =>
+          i === selected
+            ? {
+                ...b,
+                x: clamp(b.x + dx, 0, img.width - b.w),
+                y: clamp(b.y + dy, 0, img.height - b.h),
+              }
+            : b,
+        ),
+      );
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editMode, img, selected, onMoveBox]);
+
   return (
     <div className="panel">
       <div
@@ -191,4 +232,8 @@ function canvasBackgroundStyle(
   if (mode === "white") return { backgroundColor: "#ffffff" };
   if (mode === "pink") return { backgroundColor: "#ec4899" };
   return { backgroundColor: "#000000" };
+}
+
+function clamp(v: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, v));
 }
