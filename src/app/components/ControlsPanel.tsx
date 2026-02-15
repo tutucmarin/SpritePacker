@@ -49,10 +49,8 @@ type Props = {
   // download
   downloadMode: "sprites" | "atlas";
   onDownloadMode: (m: "sprites" | "atlas") => void;
-  fmt: "png" | "jpeg" | "webp";
-  quality: number;
-  onFmt: (f: "png" | "jpeg" | "webp") => void;
-  onQuality: (q: number) => void;
+  archive: boolean;
+  onArchive: (v: boolean) => void;
   onDownload: () => void;
 };
 
@@ -90,10 +88,8 @@ export function ControlsPanel(props: Props) {
     onFit,
     downloadMode,
     onDownloadMode,
-    fmt,
-    quality,
-    onFmt,
-    onQuality,
+    archive,
+    onArchive,
     onDownload,
   } = props;
 
@@ -145,10 +141,8 @@ export function ControlsPanel(props: Props) {
       <DownloadSection
         mode={downloadMode}
         onMode={onDownloadMode}
-        fmt={fmt}
-        quality={quality}
-        onFmt={onFmt}
-        onQuality={onQuality}
+        archive={archive}
+        onArchive={onArchive}
         onDownload={onDownload}
       />
 

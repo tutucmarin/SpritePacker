@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import JSZip from "jszip";
 import { ComponentDetector } from "@/src/lib/component-detector";
-import { currentMimeAndExt } from "@/src/lib/exporter";
 import type { ComponentBox } from "@/src/lib/types";
 import {
   loadImageFromFile,
@@ -46,8 +45,7 @@ type SpritePackerState = {
   atlasHeight: number | null;
   fixedSize: boolean;
   downloadMode: "sprites" | "atlas";
-  fmt: "png" | "jpeg" | "webp";
-  quality: number;
+  archive: boolean;
   bgMode: "auto" | "alpha" | "key" | "custom";
   cclTol: number;
   background: BackgroundMode;
@@ -85,8 +83,7 @@ type SpritePackerActions = {
   onDeleteDuplicates: (report: DupReport) => Promise<void>;
   onDownload: () => void;
   onDownloadMode: (m: "sprites" | "atlas") => void;
-  onFmt: (f: "png" | "jpeg" | "webp") => void;
-  onQuality: (q: number) => void;
+  onArchive: (v: boolean) => void;
   onBgMode: (v: "auto" | "alpha" | "key" | "custom") => void;
   onTol: (v: number) => void;
   onProjectName: (v: string) => void;
@@ -112,8 +109,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
   const [originalImg, setOriginalImg] = useState<HTMLImageElement | null>(null);
   const [originalBoxes, setOriginalBoxes] = useState<ComponentBox[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
-  const [fmt, setFmt] = useState<"png" | "jpeg" | "webp">("png");
-  const [quality, setQuality] = useState(0.92);
+  const [archive, setArchive] = useState(true);
   const [bgMode, setBgMode] = useState<"auto" | "alpha" | "key" | "custom">(
     "auto",
   );
@@ -527,8 +523,6 @@ export function useSpritePacker(): UseSpritePackerReturn {
     if (!img || !boxes.length) return;
     const zip = new JSZip();
     const ordered = orderBoxes(boxes);
-    const mime = currentMimeAndExt(fmt);
-    const q = mime.lossy ? Math.max(0, Math.min(1, quality)) : undefined;
     const tmp = document.createElement("canvas");
     const tctx = tmp.getContext("2d")!;
     for (let i = 0; i < ordered.length; i++) {
@@ -538,25 +532,40 @@ export function useSpritePacker(): UseSpritePackerReturn {
       tctx.clearRect(0, 0, b.w, b.h);
       tctx.drawImage(img, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
       const name = (b.name && b.name.trim()) || `sprite-${i + 1}`;
-      const blob = await toBlob(tmp, mime.mime, q);
-      zip.file(`${name}.${mime.ext === "jpg" ? "jpg" : mime.ext}`, blob);
+      const blob = await toBlob(tmp, "image/png");
+      zip.file(`${name}.png`, blob);
     }
     const content = await zip.generateAsync({ type: "blob" });
     triggerDownload(content, `${safeProjectName(projectName)}-sprites.zip`);
   };
 
-  const downloadAtlasZip = async () => {
+  const downloadSpritesFiles = async () => {
     if (!img || !boxes.length) return;
+    const ordered = orderBoxes(boxes);
+    const tmp = document.createElement("canvas");
+    const tctx = tmp.getContext("2d")!;
+    for (let i = 0; i < ordered.length; i++) {
+      const b = ordered[i];
+      tmp.width = b.w;
+      tmp.height = b.h;
+      tctx.clearRect(0, 0, b.w, b.h);
+      tctx.drawImage(img, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
+      const name = (b.name && b.name.trim()) || `sprite-${i + 1}`;
+      const blob = await toBlob(tmp, "image/png");
+      triggerDownload(blob, `${name}.png`);
+    }
+  };
+
+  const buildAtlasArtifacts = async () => {
+    if (!img || !boxes.length) return null;
     const baseName = safeProjectName(projectName);
     const imageName = `${baseName}.png`;
-    const zip = new JSZip();
     const imgCanvas = document.createElement("canvas");
     imgCanvas.width = img.width;
     imgCanvas.height = img.height;
     const ctx = imgCanvas.getContext("2d")!;
     ctx.drawImage(img, 0, 0);
-    const imgBlob = await toBlob(imgCanvas, "image/png");
-    zip.file(imageName, imgBlob);
+    const imageBlob = await toBlob(imgCanvas, "image/png");
     const ordered = orderBoxes(boxes);
     const frames = ordered.map((b, i) => ({
       filename: (b.name && b.name.trim()) || `sprite-${i + 1}`,
@@ -574,16 +583,40 @@ export function useSpritePacker(): UseSpritePackerReturn {
       scale: 1,
     };
     if (jsonFormat === "unity") {
-      const atlasText = buildUnityAtlas(frames, meta);
-      zip.file(`${baseName}.atlas`, atlasText);
-    } else {
-      const payload = buildPayloadForFormat(jsonFormat, frames, meta);
-      const ext = jsonFormat === "tpsheet" ? "tpsheet" : "json";
-      const name = `${baseName}.${ext}`;
-      zip.file(name, JSON.stringify(payload, null, 2));
+      const dataName = `${baseName}.atlas`;
+      const dataBlob = new Blob([buildUnityAtlas(frames, meta)], {
+        type: "text/plain;charset=utf-8",
+      });
+      return { baseName, imageName, imageBlob, dataName, dataBlob };
     }
+    const payload = buildPayloadForFormat(jsonFormat, frames, meta);
+    const ext = jsonFormat === "tpsheet" ? "tpsheet" : "json";
+    const dataName = `${baseName}.${ext}`;
+    const dataBlob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    return { baseName, imageName, imageBlob, dataName, dataBlob };
+  };
+
+  const downloadAtlasZip = async () => {
+    const artifacts = await buildAtlasArtifacts();
+    if (!artifacts) return;
+    const { baseName, imageName, imageBlob, dataName, dataBlob } = artifacts;
+    const zip = new JSZip();
+    zip.file(imageName, imageBlob);
+    zip.file(dataName, dataBlob);
     const content = await zip.generateAsync({ type: "blob" });
     triggerDownload(content, `${baseName}.zip`);
+  };
+
+  const downloadAtlasFiles = async () => {
+    const artifacts = await buildAtlasArtifacts();
+    if (!artifacts) return;
+    const { imageName, imageBlob, dataName, dataBlob } = artifacts;
+    triggerDownload(imageBlob, imageName);
+    setTimeout(() => {
+      triggerDownload(dataBlob, dataName);
+    }, 60);
   };
 
   const handlePackerChange = async (
@@ -622,8 +655,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
     atlasHeight,
     fixedSize,
     downloadMode,
-    fmt,
-    quality,
+    archive,
     bgMode,
     cclTol,
     background,
@@ -708,12 +740,17 @@ export function useSpritePacker(): UseSpritePackerReturn {
     onDetectDuplicates: detectDuplicates,
     onDeleteDuplicates: deleteDuplicates,
     onDownload: () => {
-      if (downloadMode === "sprites") downloadSpritesZip();
-      else downloadAtlasZip();
+      if (downloadMode === "sprites") {
+        if (archive) downloadSpritesZip();
+        else downloadSpritesFiles();
+      } else if (archive) {
+        downloadAtlasZip();
+      } else {
+        downloadAtlasFiles();
+      }
     },
     onDownloadMode: setDownloadMode,
-    onFmt: setFmt,
-    onQuality: setQuality,
+    onArchive: setArchive,
     onBgMode: setBgMode,
     onTol: setCclTol,
     onProjectName: setProjectName,

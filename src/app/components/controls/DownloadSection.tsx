@@ -1,20 +1,16 @@
 type Props = {
   mode: "sprites" | "atlas";
   onMode: (m: "sprites" | "atlas") => void;
-  fmt: "png" | "jpeg" | "webp";
-  quality: number;
-  onFmt: (f: "png" | "jpeg" | "webp") => void;
-  onQuality: (q: number) => void;
+  archive: boolean;
+  onArchive: (v: boolean) => void;
   onDownload: () => void;
 };
 
 export function DownloadSection({
   mode,
   onMode,
-  fmt,
-  quality,
-  onFmt,
-  onQuality,
+  archive,
+  onArchive,
   onDownload,
 }: Props) {
   return (
@@ -41,22 +37,14 @@ export function DownloadSection({
           />
           Atlas
         </label>
-        <select value={fmt} onChange={(e) => onFmt(e.target.value as any)}>
-          <option value="png">png</option>
-          <option value="jpeg">jpeg</option>
-          <option value="webp">webp</option>
-        </select>
-        {["jpeg", "webp"].includes(fmt) && (
+        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <input
-            type="number"
-            min="0"
-            max="1"
-            step="0.01"
-            value={quality}
-            onChange={(e) => onQuality(parseFloat(e.target.value || "0.92"))}
-            style={{ width: 70 }}
+            type="checkbox"
+            checked={archive}
+            onChange={(e) => onArchive(e.target.checked)}
           />
-        )}
+          Archieve
+        </label>
         <button onClick={onDownload}>Download</button>
       </div>
     </div>
