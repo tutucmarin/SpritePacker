@@ -659,7 +659,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
     pad = spacing,
   ) => {
     setPackerMode(mode);
-    if (pad !== spacing) {
+    if (originalImg && originalBoxes.length) {
       await applyRepack(mode, pad, atlasWidth, atlasHeight);
       return;
     }
@@ -1109,6 +1109,8 @@ function packCanvases(
   if (targetW && targetW > 0) candidates.add(Math.max(minWidth, targetW));
   let best: {
     placements: {
+      idx: number;
+      name?: string;
       x: number;
       y: number;
       w: number;
@@ -1125,17 +1127,21 @@ function packCanvases(
     let rowH = 0;
     let maxRowW = 0;
     const placements: {
+      idx: number;
+      name?: string;
       x: number;
       y: number;
       w: number;
       h: number;
       canvas: HTMLCanvasElement;
     }[] = [];
-    const ordered = [...items].sort((a, b) => {
-      if (mode === "optimal") return b.h - a.h || b.w - a.w;
-      if (mode === "maxrect") return b.w * b.h > a.w * a.h ? -1 : 1;
-      return 0;
-    });
+    const ordered = items
+      .map((item, idx) => ({ ...item, idx }))
+      .sort((a, b) => {
+        if (mode === "optimal") return b.h - a.h || b.w - a.w;
+        if (mode === "maxrect") return b.w * b.h > a.w * a.h ? -1 : 1;
+        return 0;
+      });
     for (const b of ordered) {
       if (x > 0 && x + b.w + pad > width) {
         x = 0;
@@ -1170,14 +1176,16 @@ function packCanvases(
   });
   const outImg = new Image();
   outImg.src = canvas.toDataURL("image/png");
-  const outBoxes = best.placements.map((p, i) => ({
-    id: i + 1,
-    name: (p as any).name || `sprite-${i + 1}`,
-    x: p.x,
-    y: p.y,
-    w: p.w,
-    h: p.h,
-  }));
+  const outBoxes = [...best.placements]
+    .sort((a, b) => a.idx - b.idx)
+    .map((p, i) => ({
+      id: i + 1,
+      name: p.name || `sprite-${i + 1}`,
+      x: p.x,
+      y: p.y,
+      w: p.w,
+      h: p.h,
+    }));
   return { img: outImg, boxes: outBoxes };
 }
 
