@@ -30,6 +30,7 @@ export default function Page() {
     atlasHeight,
     fixedSize,
     downloadMode,
+    atlasImageFormat,
     archive,
     bgMode,
     cclTol,
@@ -101,8 +102,11 @@ export default function Page() {
           onDelete={actions.onDeleteSelected}
           onReplace={actions.onReplaceSelected}
           onFit={actions.onFitSelected}
+          onRotate={actions.onRotateSelected}
           downloadMode={downloadMode}
           onDownloadMode={actions.onDownloadMode}
+          atlasImageFormat={atlasImageFormat}
+          onAtlasImageFormat={actions.onAtlasImageFormat}
           archive={archive}
           onArchive={actions.onArchive}
           onDownload={actions.onDownload}

@@ -1,4 +1,5 @@
 import type { ComponentBox } from "./types";
+import { loadImageFromCanvas } from "./image-utils";
 
 type PackerMode = "default" | "optimal" | "maxrect";
 
@@ -96,6 +97,10 @@ export async function repackSprites(
     ctx.drawImage(p.canvas, 0, 0, p.w, p.h, p.x, p.y, p.w, p.h);
   }
   const newImg = await loadImageFromCanvas(canvas);
+  crops.forEach((crop) => {
+    crop.canvas.width = 0;
+    crop.canvas.height = 0;
+  });
   const backToOrder = best.placements
     .sort((a, b) => (a.idx ?? 0) - (b.idx ?? 0))
     .map((p) => {
@@ -103,14 +108,4 @@ export async function repackSprites(
       return rest;
     });
   return { img: newImg, boxes: backToOrder };
-}
-
-function loadImageFromCanvas(canvas: HTMLCanvasElement): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const url = canvas.toDataURL("image/png");
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = (e) => reject(e);
-    img.src = url;
-  });
 }

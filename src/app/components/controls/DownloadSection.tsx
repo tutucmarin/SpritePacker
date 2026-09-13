@@ -1,8 +1,12 @@
+import type { AtlasImageFormat } from "@/src/lib/atlas-format";
+
 type Props = {
   mode: "sprites" | "atlas";
   onMode: (m: "sprites" | "atlas") => void;
   archive: boolean;
   onArchive: (v: boolean) => void;
+  imageFormat: AtlasImageFormat;
+  onImageFormat: (format: AtlasImageFormat) => void;
   onDownload: () => void;
 };
 
@@ -11,6 +15,8 @@ export function DownloadSection({
   onMode,
   archive,
   onArchive,
+  imageFormat,
+  onImageFormat,
   onDownload,
 }: Props) {
   return (
@@ -43,6 +49,22 @@ export function DownloadSection({
           </div>
         </div>
       </div>
+      {mode === "atlas" && (
+        <div className="setting-row" style={{ marginTop: 8 }}>
+          <label className="label" htmlFor="atlas-image-format">Image format</label>
+          <div className="control">
+            <select
+              id="atlas-image-format"
+              value={imageFormat}
+              onChange={(event) => onImageFormat(event.target.value as AtlasImageFormat)}
+            >
+              <option value="png">PNG</option>
+              <option value="webp">WebP</option>
+              <option value="jpeg">JPEG</option>
+            </select>
+          </div>
+        </div>
+      )}
       <div className="setting-row" style={{ marginTop: 8 }}>
         <span className="label">Archive</span>
         <div className="control">

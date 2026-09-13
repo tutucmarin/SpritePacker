@@ -11,6 +11,7 @@ type Props = {
   onDelete: () => void;
   onReplace: (file: File) => void;
   onFit: () => void;
+  onRotate: (direction: "left" | "right") => Promise<void> | void;
 };
 
 export function SpriteInfo({
@@ -20,6 +21,7 @@ export function SpriteInfo({
   onDelete,
   onReplace,
   onFit,
+  onRotate,
 }: Props) {
   const [name, setName] = useState("");
   const [x, setX] = useState(0);
@@ -123,6 +125,27 @@ export function SpriteInfo({
                 onClick={onFit}
               >
                 Fit
+              </button>
+            </div>
+          </div>
+          <div className="setting-row" style={{ marginTop: 8 }}>
+            <span className="label">Rotate</span>
+            <div className="control sprite-actions">
+              <button
+                className="secondary btn-icon"
+                title="Rotate sprite left"
+                aria-label="Rotate sprite left"
+                onClick={() => onRotate("left")}
+              >
+                Left
+              </button>
+              <button
+                className="secondary btn-icon"
+                title="Rotate sprite right"
+                aria-label="Rotate sprite right"
+                onClick={() => onRotate("right")}
+              >
+                Right
               </button>
             </div>
           </div>

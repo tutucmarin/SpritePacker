@@ -5,7 +5,7 @@ type Props = {
   boxes: ComponentBox[];
   selected: number | null;
   onSelect: (idx: number | null) => void;
-  onFiles: (files?: FileList) => void;
+  onFiles: (files?: File[]) => void;
   itemRefs: React.MutableRefObject<Record<number, HTMLDivElement | null>>;
 };
 
@@ -19,7 +19,8 @@ export function SpritesPanel({
   const [query, setQuery] = useState("");
 
   const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    onFiles(e.target.files || undefined);
+    onFiles(Array.from(e.target.files || []));
+    e.target.value = "";
   };
   const inputId = "file-input-sprites";
   const normalizedQuery = query.trim().toLowerCase();

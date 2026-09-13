@@ -44,20 +44,21 @@ export function CanvasStage({
     });
   const showReset = Math.abs(zoom - 1) > 0.001;
 
-  // draw image and overlay
+  // The atlas bitmap changes far less often than the selection overlay. Avoid
+  // reallocating and redrawing the full atlas for every pointer move.
   useEffect(() => {
-    if (!canvasRef.current || !overlayRef.current || !img) return;
     const canvas = canvasRef.current;
-    const overlay = overlayRef.current;
+    if (!canvas) return;
+    if (!img) {
+      canvas.width = 0;
+      canvas.height = 0;
+      return;
+    }
     const ctx = canvas.getContext("2d");
-    const octx = overlay.getContext("2d");
-    if (!ctx || !octx) return;
-    canvas.width = img.width;
-    canvas.height = img.height;
-    overlay.width = img.width;
-    overlay.height = img.height;
+    if (!ctx) return;
+    if (canvas.width !== img.width) canvas.width = img.width;
+    if (canvas.height !== img.height) canvas.height = img.height;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    octx.clearRect(0, 0, overlay.width, overlay.height);
 
     // draw checkerboard background
     const bgStyle = canvasBackgroundStyle(background);
@@ -70,6 +71,21 @@ export function CanvasStage({
     }
 
     ctx.drawImage(img, 0, 0);
+  }, [img, canvasRef, background]);
+
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+    if (!img) {
+      overlay.width = 0;
+      overlay.height = 0;
+      return;
+    }
+    const octx = overlay.getContext("2d");
+    if (!octx) return;
+    if (overlay.width !== img.width) overlay.width = img.width;
+    if (overlay.height !== img.height) overlay.height = img.height;
+    octx.clearRect(0, 0, overlay.width, overlay.height);
     boxes.forEach((b, i) => {
       const isSel = selected === i;
       octx.strokeStyle = isSel
@@ -93,7 +109,7 @@ export function CanvasStage({
       octx.fillRect(draftBox.x, draftBox.y, draftBox.w, draftBox.h);
       octx.setLineDash([]);
     }
-  }, [img, boxes, selected, draftBox, canvasRef, overlayRef, background]);
+  }, [img, boxes, selected, draftBox, overlayRef]);
 
   useEffect(() => {
     if (overlayRef.current) {

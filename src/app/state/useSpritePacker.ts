@@ -4,6 +4,7 @@ import { ComponentDetector } from "@/src/lib/component-detector";
 import type { ComponentBox } from "@/src/lib/types";
 import {
   loadImageFromFile,
+  loadImageFromCanvas,
   toBlob,
   triggerDownload,
   safeProjectName,
@@ -17,6 +18,11 @@ import {
   overlaps,
 } from "@/src/lib/box-utils";
 import { hashBytes } from "@/src/lib/hash";
+import {
+  atlasFormatFromFile,
+  atlasFormatInfo,
+  type AtlasImageFormat,
+} from "@/src/lib/atlas-format";
 
 export type JsonFormat =
   | "json-array"
@@ -45,6 +51,7 @@ type SpritePackerState = {
   atlasHeight: number | null;
   fixedSize: boolean;
   downloadMode: "sprites" | "atlas";
+  atlasImageFormat: AtlasImageFormat;
   archive: boolean;
   bgMode: "auto" | "alpha" | "key" | "custom";
   cclTol: number;
@@ -56,7 +63,7 @@ type SpritePackerState = {
 };
 
 type SpritePackerActions = {
-  onFiles: (files?: FileList) => Promise<void>;
+  onFiles: (files?: File[]) => Promise<void>;
   onDetect: () => Promise<void>;
   onCustomJson: (file?: File) => Promise<void>;
   onSelect: (idx: number | null) => void;
@@ -70,6 +77,7 @@ type SpritePackerActions = {
   ) => Promise<void>;
   onReplaceSelected: (file: File) => Promise<void>;
   onFitSelected: () => Promise<void>;
+  onRotateSelected: (direction: "left" | "right") => Promise<void>;
   onPackerChange: (
     mode: "default" | "optimal" | "maxrect",
     spacing?: number,
@@ -83,6 +91,7 @@ type SpritePackerActions = {
   onDeleteDuplicates: (report: DupReport) => Promise<void>;
   onDownload: () => void;
   onDownloadMode: (m: "sprites" | "atlas") => void;
+  onAtlasImageFormat: (format: AtlasImageFormat) => void;
   onArchive: (v: boolean) => void;
   onBgMode: (v: "auto" | "alpha" | "key" | "custom") => void;
   onTol: (v: number) => void;
@@ -117,6 +126,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
   const [downloadMode, setDownloadMode] = useState<"sprites" | "atlas">(
     "atlas",
   );
+  const [atlasImageFormat, setAtlasImageFormat] = useState<AtlasImageFormat>("png");
   const [projectName, setProjectName] = useState("project");
   const [packerMode, setPackerMode] = useState<
     "default" | "optimal" | "maxrect"
@@ -147,19 +157,33 @@ export function useSpritePacker(): UseSpritePackerReturn {
   };
 
   const addBoxIfNonOverlap = (b: ComponentBox): number | null => {
-    let idx: number | null = null;
-    setBoxes((prev) => {
-      if (prev.some((p) => overlaps(p, b))) return prev;
-      idx = prev.length;
-      return [...prev, b];
-    });
-    if (idx != null) {
-      setOriginalBoxes((prev) => [...prev, b]);
+    if (boxes.some((p) => overlaps(p, b))) return null;
+    let name = b.name?.trim();
+    if (!name) {
+      let number = boxes.length + 1;
+      while (boxes.some((p, i) => spriteNameKey(spriteName(p, i)) === spriteNameKey(`sprite-${number}`))) {
+        number++;
+      }
+      name = `sprite-${number}`;
     }
-    return idx;
+    const duplicate = boxes.findIndex(
+      (p, i) => spriteNameKey(spriteName(p, i)) === spriteNameKey(name),
+    );
+    const nextBox = { ...b, name };
+    if (duplicate >= 0) {
+      if (!confirm(`A sprite named "${name}" already exists. Replace it?`))
+        return null;
+      setBoxes((prev) => prev.map((p, i) => i === duplicate ? nextBox : p));
+      setOriginalBoxes((prev) => prev.map((p, i) => i === duplicate ? nextBox : p));
+      return duplicate;
+    }
+    const index = boxes.length;
+    setBoxes((prev) => [...prev, nextBox]);
+    setOriginalBoxes((prev) => [...prev, nextBox]);
+    return index;
   };
 
-  const handleFiles = async (files?: FileList) => {
+  const handleFiles = async (files?: File[]) => {
     if (!files || !files.length) return;
     const canvases: {
       canvas: HTMLCanvasElement;
@@ -168,6 +192,8 @@ export function useSpritePacker(): UseSpritePackerReturn {
       name?: string;
     }[] = [];
     let firstName = "";
+    let firstFormat: AtlasImageFormat | null = null;
+    let accepted = 0;
     if (originalImg && originalBoxes.length) {
       originalBoxes.forEach((b, idx) => {
         const c = document.createElement("canvas");
@@ -194,20 +220,42 @@ export function useSpritePacker(): UseSpritePackerReturn {
     }
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
-      if (!firstName) firstName = f.name.replace(/\.[^.]+$/, "") || "project";
+      const name = f.name.replace(/\.[^.]+$/, "").trim() || `sprite-${i + 1}`;
+      const duplicate = canvases.findIndex(
+        (item) => spriteNameKey(item.name || "") === spriteNameKey(name),
+      );
+      if (duplicate >= 0 && !confirm(`A sprite named "${name}" already exists. Replace it?`))
+        continue;
+      if (!firstName) firstName = name;
+      if (!firstFormat) firstFormat = atlasFormatFromFile(f);
       const nextImg = await loadImageFromFile(f);
       const c = document.createElement("canvas");
       c.width = nextImg.width;
       c.height = nextImg.height;
       c.getContext("2d")?.drawImage(nextImg, 0, 0);
-      canvases.push({
+      const item = {
         canvas: c,
         w: c.width,
         h: c.height,
-        name: f.name.replace(/\.[^.]+$/, ""),
-      });
+        name,
+      };
+      if (duplicate >= 0) {
+        canvases[duplicate].canvas.width = 0;
+        canvases[duplicate].canvas.height = 0;
+        canvases[duplicate] = item;
+      } else {
+        canvases.push(item);
+      }
+      accepted++;
     }
-    const packed = packCanvases(
+    if (!accepted) {
+      canvases.forEach((item) => {
+        item.canvas.width = 0;
+        item.canvas.height = 0;
+      });
+      return;
+    }
+    const packed = await packCanvases(
       canvases,
       spacing,
       packerMode,
@@ -215,6 +263,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       fixedSize ? atlasHeight : null,
     );
     if (packed) {
+      if (!img && firstFormat) setAtlasImageFormat(firstFormat);
       setImg(packed.img);
       setOriginalImg(packed.img);
       setBoxes(packed.boxes);
@@ -544,6 +593,53 @@ export function useSpritePacker(): UseSpritePackerReturn {
     );
   };
 
+  const handleRotateSelected = async (direction: "left" | "right") => {
+    if (selected == null || !boxes.length || !img) return;
+    const target = boxes[selected];
+    const rotated = getCenteredRotatedBox(target, img.width, img.height);
+    if (!rotated) {
+      alert("This sprite cannot be rotated inside the current atlas bounds.");
+      return;
+    }
+
+    const placed = findNonOverlappingPlacement(
+      rotated,
+      boxes,
+      selected,
+      img.width,
+      img.height,
+    );
+    if (!placed) {
+      alert(
+        "Could not find a non-overlapping position for the rotated sprite.",
+      );
+      return;
+    }
+
+    const nextBox: ComponentBox = {
+      ...target,
+      x: placed.x,
+      y: placed.y,
+      w: placed.w,
+      h: placed.h,
+    };
+    const nextAtlas = await rotateImageRegion(img, target, nextBox, direction);
+    if (!nextAtlas) {
+      alert("Could not rotate sprite pixels on the atlas image.");
+      return;
+    }
+
+    setImg(nextAtlas);
+    setOriginalImg(nextAtlas);
+    setBoxes((prev) => prev.map((b, i) => (i === selected ? nextBox : b)));
+    setOriginalBoxes((prev) =>
+      prev.map((b, i) => (i === selected ? nextBox : b)),
+    );
+    setCustomBoxes((prev) =>
+      prev ? prev.map((b, i) => (i === selected ? nextBox : b)) : prev,
+    );
+  };
+
   const handleClear = () => {
     setBoxes([]);
     setOriginalBoxes([]);
@@ -552,6 +648,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
     setAtlasWidth(null);
     setAtlasHeight(null);
     setSelected(null);
+    setAtlasImageFormat("png");
   };
 
   const downloadSpritesZip = async () => {
@@ -571,6 +668,8 @@ export function useSpritePacker(): UseSpritePackerReturn {
       zip.file(`${name}.png`, blob);
     }
     const content = await zip.generateAsync({ type: "blob" });
+    tmp.width = 0;
+    tmp.height = 0;
     triggerDownload(content, `${safeProjectName(projectName)}-sprites.zip`);
   };
 
@@ -589,18 +688,26 @@ export function useSpritePacker(): UseSpritePackerReturn {
       const blob = await toBlob(tmp, "image/png");
       triggerDownload(blob, `${name}.png`);
     }
+    tmp.width = 0;
+    tmp.height = 0;
   };
 
   const buildAtlasArtifacts = async () => {
     if (!img || !boxes.length) return null;
     const baseName = safeProjectName(projectName);
-    const imageName = `${baseName}.png`;
+    const { mime, extension } = atlasFormatInfo(atlasImageFormat);
+    const imageName = `${baseName}.${extension}`;
     const imgCanvas = document.createElement("canvas");
     imgCanvas.width = img.width;
     imgCanvas.height = img.height;
     const ctx = imgCanvas.getContext("2d")!;
     ctx.drawImage(img, 0, 0);
-    const imageBlob = await toBlob(imgCanvas, "image/png");
+    const imageBlob = await toBlob(imgCanvas, mime);
+    imgCanvas.width = 0;
+    imgCanvas.height = 0;
+    if (imageBlob.type !== mime) {
+      throw new Error(`This browser cannot export ${extension.toUpperCase()} images.`);
+    }
     const ordered = orderBoxes(boxes);
     const frames = ordered.map((b, i) => ({
       filename: (b.name && b.name.trim()) || `sprite-${i + 1}`,
@@ -694,6 +801,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
     atlasHeight,
     fixedSize,
     downloadMode,
+    atlasImageFormat,
     archive,
     bgMode,
     cclTol,
@@ -714,13 +822,28 @@ export function useSpritePacker(): UseSpritePackerReturn {
     onClearAll: handleClear,
     onUpdateSelected: async (next, applyToImage = false) => {
       if (selected == null || !selectedBox) return;
-      const nextBox: ComponentBox = { ...selectedBox, ...next };
+      const nextBox: ComponentBox = { ...selectedBox, ...next, name: next.name?.trim() };
+      const duplicateIndex = nextBox.name
+        ? boxes.findIndex(
+            (box, index) =>
+              index !== selected &&
+              spriteNameKey(spriteName(box, index)) === spriteNameKey(nextBox.name || ""),
+          )
+        : -1;
+      if (
+        duplicateIndex >= 0 &&
+        !confirm(`A sprite named "${nextBox.name}" already exists. Replace it?`)
+      ) {
+        return;
+      }
       const geometryChanged =
         selectedBox.x !== nextBox.x ||
         selectedBox.y !== nextBox.y ||
         selectedBox.w !== nextBox.w ||
         selectedBox.h !== nextBox.h;
 
+      let nextAtlas: HTMLImageElement | null = img;
+      let nextOriginal: HTMLImageElement | null = originalImg;
       if (applyToImage && geometryChanged) {
         if (img && !isBoxInsideImage(nextBox, img)) {
           alert("Updated sprite bounds must stay inside the atlas image.");
@@ -731,7 +854,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
           return;
         }
 
-        const [nextAtlas, nextOriginal] = await Promise.all([
+        [nextAtlas, nextOriginal] = await Promise.all([
           img
             ? transformImageRegion(img, selectedBox, nextBox)
             : Promise.resolve(null),
@@ -748,24 +871,49 @@ export function useSpritePacker(): UseSpritePackerReturn {
           alert("Could not apply sprite changes to source image.");
           return;
         }
-        if (nextAtlas) setImg(nextAtlas);
-        if (nextOriginal) setOriginalImg(nextOriginal);
       }
 
+      if (duplicateIndex >= 0) {
+        const duplicateBox = boxes[duplicateIndex];
+        const duplicateOriginalBox = originalBoxes[duplicateIndex] ?? duplicateBox;
+        const sharedImage =
+          nextAtlas === nextOriginal &&
+          duplicateBox.x === duplicateOriginalBox.x &&
+          duplicateBox.y === duplicateOriginalBox.y &&
+          duplicateBox.w === duplicateOriginalBox.w &&
+          duplicateBox.h === duplicateOriginalBox.h;
+        if (nextAtlas) {
+          nextAtlas = await clearRegionPreservingBox(nextAtlas, duplicateBox, nextBox);
+        }
+        if (sharedImage) {
+          nextOriginal = nextAtlas;
+        } else if (nextOriginal) {
+          nextOriginal = await clearRegionPreservingBox(
+            nextOriginal,
+            duplicateOriginalBox,
+            nextBox,
+          );
+        }
+      }
+      if (nextAtlas !== img) setImg(nextAtlas);
+      if (nextOriginal !== originalImg) setOriginalImg(nextOriginal);
+
       setBoxes((prev) =>
-        prev.map((b, i) => (i === selected ? { ...b, ...nextBox } : b)),
+        prev.map((b, i) => (i === selected ? nextBox : b)).filter((_, i) => i !== duplicateIndex),
       );
       setOriginalBoxes((prev) =>
-        prev.map((b, i) => (i === selected ? { ...b, ...nextBox } : b)),
+        prev.map((b, i) => (i === selected ? nextBox : b)).filter((_, i) => i !== duplicateIndex),
       );
       setCustomBoxes((prev) =>
         prev
-          ? prev.map((b, i) => (i === selected ? { ...b, ...nextBox } : b))
+          ? prev.map((b, i) => (i === selected ? nextBox : b)).filter((_, i) => i !== duplicateIndex)
           : prev,
       );
+      if (duplicateIndex >= 0 && duplicateIndex < selected) setSelected(selected - 1);
     },
     onReplaceSelected: handleReplaceSelected,
     onFitSelected: handleFitSelected,
+    onRotateSelected: handleRotateSelected,
     onPackerChange: handlePackerChange,
     onAtlasWidth: onAtlasWidthChange,
     onAtlasHeight: onAtlasHeightChange,
@@ -778,17 +926,32 @@ export function useSpritePacker(): UseSpritePackerReturn {
     },
     onDetectDuplicates: detectDuplicates,
     onDeleteDuplicates: deleteDuplicates,
-    onDownload: () => {
-      if (downloadMode === "sprites") {
-        if (archive) downloadSpritesZip();
-        else downloadSpritesFiles();
-      } else if (archive) {
-        downloadAtlasZip();
-      } else {
-        downloadAtlasFiles();
+    onDownload: async () => {
+      if (!img || !boxes.length) return;
+      if (
+        downloadMode === "sprites" &&
+        !archive &&
+        boxes.length >= 10 &&
+        !confirm(
+          `Export ${boxes.length} sprites as individual files? Your browser may ask you to confirm, save, or cancel many separate downloads.`,
+        )
+      ) return;
+      try {
+        if (downloadMode === "sprites") {
+          if (archive) await downloadSpritesZip();
+          else await downloadSpritesFiles();
+        } else if (archive) {
+          await downloadAtlasZip();
+        } else {
+          await downloadAtlasFiles();
+        }
+      } catch (error) {
+        console.error(error);
+        alert(error instanceof Error ? error.message : "Download failed.");
       }
     },
     onDownloadMode: setDownloadMode,
+    onAtlasImageFormat: setAtlasImageFormat,
     onArchive: setArchive,
     onBgMode: setBgMode,
     onTol: setCclTol,
@@ -937,6 +1100,87 @@ function parseCustomSprites(data: any, format: JsonFormat): ComponentBox[] {
   return [];
 }
 
+function getCenteredRotatedBox(
+  box: ComponentBox,
+  imgW: number,
+  imgH: number,
+): Pick<ComponentBox, "x" | "y" | "w" | "h"> | null {
+  const w = box.h;
+  const h = box.w;
+  if (w > imgW || h > imgH) return null;
+  const centerX = box.x + box.w / 2;
+  const centerY = box.y + box.h / 2;
+  const maxX = Math.max(0, imgW - w);
+  const maxY = Math.max(0, imgH - h);
+  return {
+    x: clampIntToRange(centerX - w / 2, 0, maxX),
+    y: clampIntToRange(centerY - h / 2, 0, maxY),
+    w,
+    h,
+  };
+}
+
+function findNonOverlappingPlacement(
+  target: Pick<ComponentBox, "x" | "y" | "w" | "h">,
+  boxes: ComponentBox[],
+  skipIndex: number,
+  imgW: number,
+  imgH: number,
+): Pick<ComponentBox, "x" | "y" | "w" | "h"> | null {
+  const maxX = Math.max(0, imgW - target.w);
+  const maxY = Math.max(0, imgH - target.h);
+  if (target.w > imgW || target.h > imgH) return null;
+
+  const base = {
+    x: clampIntToRange(target.x, 0, maxX),
+    y: clampIntToRange(target.y, 0, maxY),
+    w: target.w,
+    h: target.h,
+  };
+  const others = boxes.filter((_, i) => i !== skipIndex);
+  const collides = (candidate: Pick<ComponentBox, "x" | "y" | "w" | "h">) =>
+    others.some((b) => overlaps(b, candidate));
+
+  if (!collides(base)) return base;
+
+  const xSet = new Set<number>([base.x, 0, maxX]);
+  const ySet = new Set<number>([base.y, 0, maxY]);
+  others.forEach((b) => {
+    xSet.add(b.x - base.w);
+    xSet.add(b.x + b.w);
+    ySet.add(b.y - base.h);
+    ySet.add(b.y + b.h);
+  });
+
+  const xs = Array.from(xSet)
+    .map((x) => clampIntToRange(x, 0, maxX))
+    .filter((x, i, arr) => arr.indexOf(x) === i);
+  const ys = Array.from(ySet)
+    .map((y) => clampIntToRange(y, 0, maxY))
+    .filter((y, i, arr) => arr.indexOf(y) === i);
+
+  const points = xs.flatMap((x) =>
+    ys.map((y) => ({
+      x,
+      y,
+      dist: Math.abs(x - base.x) + Math.abs(y - base.y),
+    })),
+  );
+
+  points.sort((a, b) => a.dist - b.dist || a.y - b.y || a.x - b.x);
+  for (const point of points) {
+    const candidate = { ...base, x: point.x, y: point.y };
+    if (!collides(candidate)) return candidate;
+  }
+
+  return null;
+}
+
+function clampIntToRange(value: number, min: number, max: number): number {
+  if (Number.isNaN(value)) return min;
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
 function detectFittedBoundsForBox(
   img: HTMLImageElement,
   target: ComponentBox,
@@ -1021,8 +1265,32 @@ async function clearRegion(
   const ctx = canvas.getContext("2d")!;
   ctx.drawImage(img, 0, 0);
   ctx.clearRect(box.x, box.y, box.w, box.h);
-  const url = canvas.toDataURL("image/png");
-  return imageFromDataUrl(url);
+  return loadImageFromCanvas(canvas);
+}
+
+async function clearRegionPreservingBox(
+  img: HTMLImageElement,
+  removed: ComponentBox,
+  kept: ComponentBox,
+): Promise<HTMLImageElement> {
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, 0, 0);
+  if (overlaps(removed, kept)) {
+    const crop = document.createElement("canvas");
+    crop.width = kept.w;
+    crop.height = kept.h;
+    crop.getContext("2d")?.drawImage(img, kept.x, kept.y, kept.w, kept.h, 0, 0, kept.w, kept.h);
+    ctx.clearRect(removed.x, removed.y, removed.w, removed.h);
+    ctx.drawImage(crop, kept.x, kept.y);
+    crop.width = 0;
+    crop.height = 0;
+  } else {
+    ctx.clearRect(removed.x, removed.y, removed.w, removed.h);
+  }
+  return loadImageFromCanvas(canvas);
 }
 
 function isBoxInsideImage(box: ComponentBox, img: HTMLImageElement): boolean {
@@ -1034,6 +1302,56 @@ function isBoxInsideImage(box: ComponentBox, img: HTMLImageElement): boolean {
     box.x + box.w <= img.width &&
     box.y + box.h <= img.height
   );
+}
+
+async function rotateImageRegion(
+  img: HTMLImageElement,
+  from: ComponentBox,
+  to: ComponentBox,
+  direction: "left" | "right",
+): Promise<HTMLImageElement | null> {
+  if (!isBoxInsideImage(from, img) || !isBoxInsideImage(to, img)) return null;
+
+  const source = document.createElement("canvas");
+  source.width = from.w;
+  source.height = from.h;
+  const sourceCtx = source.getContext("2d");
+  if (!sourceCtx) return null;
+  sourceCtx.imageSmoothingEnabled = false;
+  sourceCtx.drawImage(
+    img,
+    from.x,
+    from.y,
+    from.w,
+    from.h,
+    0,
+    0,
+    from.w,
+    from.h,
+  );
+
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0);
+  ctx.clearRect(from.x, from.y, from.w, from.h);
+  ctx.clearRect(to.x, to.y, to.w, to.h);
+
+  ctx.save();
+  if (direction === "right") {
+    ctx.translate(to.x + to.w, to.y);
+    ctx.rotate(Math.PI / 2);
+  } else {
+    ctx.translate(to.x, to.y + to.h);
+    ctx.rotate(-Math.PI / 2);
+  }
+  ctx.drawImage(source, 0, 0, from.w, from.h);
+  ctx.restore();
+
+  return await imageFromCanvas(canvas);
 }
 
 async function transformImageRegion(
@@ -1075,26 +1393,16 @@ async function transformImageRegion(
 async function imageFromCanvas(
   canvas: HTMLCanvasElement,
 ): Promise<HTMLImageElement> {
-  const url = canvas.toDataURL("image/png");
-  return imageFromDataUrl(url);
+  return loadImageFromCanvas(canvas);
 }
 
-function imageFromDataUrl(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const n = new Image();
-    n.onload = () => resolve(n);
-    n.onerror = (e) => reject(e);
-    n.src = url;
-  });
-}
-
-function packCanvases(
+async function packCanvases(
   items: { canvas: HTMLCanvasElement; w: number; h: number; name?: string }[],
   spacing: number,
   mode: "default" | "optimal" | "maxrect",
   targetW?: number | null,
   targetH?: number | null,
-): { img: HTMLImageElement; boxes: ComponentBox[] } | null {
+): Promise<{ img: HTMLImageElement; boxes: ComponentBox[] } | null> {
   if (!items.length) return null;
   const pad = Math.max(5, spacing);
   const totalArea = items.reduce((s, b) => s + b.w * b.h, 0);
@@ -1174,8 +1482,7 @@ function packCanvases(
   best.placements.forEach((p) => {
     ctx.drawImage(p.canvas, p.x, p.y, p.w, p.h);
   });
-  const outImg = new Image();
-  outImg.src = canvas.toDataURL("image/png");
+  const outImg = await loadImageFromCanvas(canvas);
   const outBoxes = [...best.placements]
     .sort((a, b) => a.idx - b.idx)
     .map((p, i) => ({
@@ -1186,7 +1493,19 @@ function packCanvases(
       w: p.w,
       h: p.h,
     }));
+  items.forEach((item) => {
+    item.canvas.width = 0;
+    item.canvas.height = 0;
+  });
   return { img: outImg, boxes: outBoxes };
+}
+
+function spriteName(box: ComponentBox, index: number): string {
+  return box.name?.trim() || `sprite-${index + 1}`;
+}
+
+function spriteNameKey(name: string): string {
+  return name.trim().toLocaleLowerCase();
 }
 
 function hashCanvas(c: HTMLCanvasElement) {

@@ -1,12 +1,37 @@
 export async function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+  return loadImageFromBlob(file);
+}
+
+export async function loadImageFromCanvas(
+  canvas: HTMLCanvasElement,
+): Promise<HTMLImageElement> {
+  try {
+    const blob = await toBlob(canvas, "image/png");
+    return await loadImageFromBlob(blob);
+  } finally {
+    // All callers pass temporary canvases. Clearing their backing stores releases
+    // the decoded pixels as soon as the encoded image has been created.
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+}
+
+function loadImageFromBlob(blob: Blob): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
+    const url = URL.createObjectURL(blob);
     const image = new Image();
     image.onload = () => {
+      image.onload = null;
+      image.onerror = null;
       URL.revokeObjectURL(url);
       resolve(image);
     };
-    image.onerror = (e) => reject(e);
+    image.onerror = () => {
+      image.onload = null;
+      image.onerror = null;
+      URL.revokeObjectURL(url);
+      reject(new Error("Failed to load image"));
+    };
     image.src = url;
   });
 }
@@ -53,7 +78,8 @@ export function triggerDownload(blob: Blob, filename: string) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Give the browser a task to begin the download before releasing the URL.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function safeProjectName(name: string) {

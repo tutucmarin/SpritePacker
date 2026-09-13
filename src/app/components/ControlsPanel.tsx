@@ -6,6 +6,7 @@ import {
 } from "@/src/app/components/controls/ProjectSection";
 import { SpriteInfo } from "@/src/app/components/controls/SpriteInfo";
 import type { ComponentBox } from "@/src/lib/types";
+import type { AtlasImageFormat } from "@/src/lib/atlas-format";
 
 type Props = {
   // project
@@ -46,8 +47,11 @@ type Props = {
   onDelete: () => void;
   onReplace: (file: File) => void;
   onFit: () => void;
+  onRotate: (direction: "left" | "right") => Promise<void> | void;
   // download
   downloadMode: "sprites" | "atlas";
+  atlasImageFormat: AtlasImageFormat;
+  onAtlasImageFormat: (format: AtlasImageFormat) => void;
   onDownloadMode: (m: "sprites" | "atlas") => void;
   archive: boolean;
   onArchive: (v: boolean) => void;
@@ -86,7 +90,10 @@ export function ControlsPanel(props: Props) {
     onDelete,
     onReplace,
     onFit,
+    onRotate,
     downloadMode,
+    atlasImageFormat,
+    onAtlasImageFormat,
     onDownloadMode,
     archive,
     onArchive,
@@ -135,12 +142,15 @@ export function ControlsPanel(props: Props) {
           onDelete={onDelete}
           onReplace={onReplace}
           onFit={onFit}
+          onRotate={onRotate}
         />
       )}
 
       <DownloadSection
         mode={downloadMode}
         onMode={onDownloadMode}
+        imageFormat={atlasImageFormat}
+        onImageFormat={onAtlasImageFormat}
         archive={archive}
         onArchive={onArchive}
         onDownload={onDownload}

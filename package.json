@@ -6,7 +6,7 @@
   "private": true,
   "main": "dist/main.js",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
     "webpack:dev": "webpack serve --config webpack.config.cjs --mode development --port 5173 --open false",
