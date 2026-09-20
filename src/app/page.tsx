@@ -29,6 +29,8 @@ export default function Page() {
     atlasWidth,
     atlasHeight,
     fixedSize,
+    autoSize,
+    atlasScale,
     downloadMode,
     atlasImageFormat,
     archive,
@@ -82,6 +84,10 @@ export default function Page() {
           onAtlasHeight={actions.onAtlasHeight}
           fixedSize={fixedSize}
           onFixedSize={actions.onFixedSize}
+          autoSize={autoSize}
+          onAutoSize={actions.onAutoSize}
+          atlasScale={atlasScale}
+          onAtlasScale={actions.onAtlasScale}
           jsonFormat={jsonFormat}
           onJsonFormat={actions.onJsonFormat}
           onClearAll={actions.onClearAll}

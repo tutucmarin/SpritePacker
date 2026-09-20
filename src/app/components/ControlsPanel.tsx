@@ -23,6 +23,10 @@ type Props = {
   onAtlasHeight: (v: number | null) => void;
   fixedSize: boolean;
   onFixedSize: (v: boolean) => void;
+  autoSize: boolean;
+  onAutoSize: (v: boolean) => void;
+  atlasScale: number;
+  onAtlasScale: (v: number) => void;
   onJsonFormat: (v: JsonFormat) => void;
   onClearAll: () => void;
   spacing: number;
@@ -70,6 +74,10 @@ export function ControlsPanel(props: Props) {
     onAtlasHeight,
     fixedSize,
     onFixedSize,
+    autoSize,
+    onAutoSize,
+    atlasScale,
+    onAtlasScale,
     jsonFormat,
     onJsonFormat,
     onClearAll,
@@ -114,6 +122,10 @@ export function ControlsPanel(props: Props) {
         onAtlasHeight={onAtlasHeight}
         fixedSize={fixedSize}
         onFixedSize={onFixedSize}
+        autoSize={autoSize}
+        onAutoSize={onAutoSize}
+        atlasScale={atlasScale}
+        onAtlasScale={onAtlasScale}
         jsonFormat={jsonFormat}
         onJsonFormat={onJsonFormat}
         onClearAll={onClearAll}

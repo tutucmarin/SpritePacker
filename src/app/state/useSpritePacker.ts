@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import { ComponentDetector } from "@/src/lib/component-detector";
 import type { ComponentBox } from "@/src/lib/types";
@@ -10,6 +10,7 @@ import {
   safeProjectName,
 } from "@/src/lib/image-utils";
 import { repackSprites } from "@/src/lib/packing";
+import { findOptimalShelfPacking } from "@/src/lib/optimal-packing";
 import { useDisablePageZoom } from "@/src/hooks/useDisablePageZoom";
 import { useThemePrefs, BackgroundMode } from "@/src/app/state/useThemePrefs";
 import {
@@ -50,6 +51,8 @@ type SpritePackerState = {
   atlasWidth: number | null;
   atlasHeight: number | null;
   fixedSize: boolean;
+  autoSize: boolean;
+  atlasScale: number;
   downloadMode: "sprites" | "atlas";
   atlasImageFormat: AtlasImageFormat;
   archive: boolean;
@@ -85,6 +88,8 @@ type SpritePackerActions = {
   onAtlasWidth: (v: number | null) => Promise<void>;
   onAtlasHeight: (v: number | null) => Promise<void>;
   onFixedSize: (v: boolean) => Promise<void>;
+  onAutoSize: (v: boolean) => Promise<void>;
+  onAtlasScale: (v: number) => Promise<void>;
   onJsonFormat: (v: JsonFormat) => void;
   onSpacing: (v: number) => Promise<void>;
   onDetectDuplicates: () => void;
@@ -133,12 +138,107 @@ export function useSpritePacker(): UseSpritePackerReturn {
   >("default");
   const [jsonFormat, setJsonFormat] = useState<JsonFormat>("json-array");
   const [spacing, setSpacing] = useState(10);
-  const [atlasWidth, setAtlasWidth] = useState<number | null>(2048);
-  const [atlasHeight, setAtlasHeight] = useState<number | null>(2048);
+  const [atlasWidth, setAtlasWidth] = useState<number | null>(null);
+  const [atlasHeight, setAtlasHeight] = useState<number | null>(null);
   const [fixedSize, setFixedSize] = useState(false);
+  const [atlasScale, setAtlasScale] = useState(100);
+  const atlasScaleRef = useRef(100);
   const [showSettings, setShowSettings] = useState(false);
   const [dupReport, setDupReport] = useState<DupReport | null>(null);
   const [customBoxes, setCustomBoxes] = useState<ComponentBox[] | null>(null);
+  const renderRevision = useRef(0);
+  const commitRevision = useRef(0);
+
+  const renderScaledAtlas = async (
+    sourceImg: HTMLImageElement,
+    sourceBoxes: ComponentBox[],
+    scalePercent = atlasScaleRef.current,
+  ) => {
+    const revision = ++renderRevision.current;
+    const scale = clampAtlasScale(scalePercent) / 100;
+    const scaledBoxes = sourceBoxes.map((box) => scaleBox(box, scale));
+    let rendered = sourceImg;
+
+    if (scale !== 1) {
+      const canvas = document.createElement("canvas");
+      const contentWidth = scaledBoxes.reduce(
+        (max, box) => Math.max(max, box.x + box.w),
+        1,
+      );
+      const contentHeight = scaledBoxes.reduce(
+        (max, box) => Math.max(max, box.y + box.h),
+        1,
+      );
+      canvas.width = Math.max(contentWidth, Math.round(sourceImg.width * scale));
+      canvas.height = Math.max(contentHeight, Math.round(sourceImg.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(sourceImg, 0, 0, canvas.width, canvas.height);
+      rendered = await loadImageFromCanvas(canvas);
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+
+    if (revision !== renderRevision.current) return;
+    setImg(rendered);
+    setBoxes(scaledBoxes);
+    setAtlasWidth(rendered.width);
+    setAtlasHeight(rendered.height);
+  };
+
+  const commitCanonicalAtlas = async (
+    sourceImg: HTMLImageElement,
+    sourceBoxes: ComponentBox[],
+    options: {
+      mode?: "default" | "optimal" | "maxrect";
+      pad?: number;
+      fixed?: boolean;
+      targetW?: number | null;
+      targetH?: number | null;
+      rotate?: { index: number; direction: "left" | "right" };
+      scalePercent?: number;
+      clearSelection?: boolean;
+    } = {},
+  ) => {
+    const revision = ++commitRevision.current;
+    if (!sourceBoxes.length) {
+      setOriginalImg(sourceImg);
+      setOriginalBoxes([]);
+      setImg(null);
+      setBoxes([]);
+      setAtlasWidth(null);
+      setAtlasHeight(null);
+      if (options.clearSelection !== false) setSelected(null);
+      return;
+    }
+
+    const useFixed = options.fixed ?? fixedSize;
+    const repacked = await repackSprites(
+      options.mode ?? packerMode,
+      sourceImg,
+      sourceBoxes,
+      options.pad ?? spacing,
+      useFixed ? options.targetW ?? sourceImg.width : null,
+      useFixed ? options.targetH ?? sourceImg.height : null,
+      {
+        compact: !useFixed,
+        rotate: options.rotate,
+      },
+    );
+    if (!repacked) return;
+    if (revision !== commitRevision.current) return;
+
+    setOriginalImg(repacked.img);
+    setOriginalBoxes(repacked.boxes);
+    if (options.clearSelection !== false) setSelected(null);
+    await renderScaledAtlas(
+      repacked.img,
+      repacked.boxes,
+      options.scalePercent ?? atlasScaleRef.current,
+    );
+  };
 
   // initialize bg mode once
   useEffect(() => {
@@ -151,7 +251,32 @@ export function useSpritePacker(): UseSpritePackerReturn {
   const onMoveBox = (updater: (prev: ComponentBox[]) => ComponentBox[]) => {
     setBoxes((prev) => {
       const next = updater(prev);
-      setOriginalBoxes(next);
+      if (boxesOverlap(next)) return prev;
+      setOriginalBoxes((current) =>
+        next.map((box, index) => {
+          const original = current[index];
+          if (!original) return unscaleBox(box, atlasScale / 100);
+          const scale = atlasScale / 100;
+          return {
+            ...original,
+            name: box.name,
+            x: Math.max(
+              0,
+              Math.min(
+                (originalImg?.width ?? Infinity) - original.w,
+                Math.round(box.x / scale),
+              ),
+            ),
+            y: Math.max(
+              0,
+              Math.min(
+                (originalImg?.height ?? Infinity) - original.h,
+                Math.round(box.y / scale),
+              ),
+            ),
+          };
+        }),
+      );
       return next;
     });
   };
@@ -170,16 +295,36 @@ export function useSpritePacker(): UseSpritePackerReturn {
       (p, i) => spriteNameKey(spriteName(p, i)) === spriteNameKey(name),
     );
     const nextBox = { ...b, name };
+    const unscaledBox = unscaleBox(nextBox, atlasScale / 100);
+    const nextOriginalBox = originalImg
+      ? fitBoxInsideImage(unscaledBox, originalImg)
+      : unscaledBox;
     if (duplicate >= 0) {
       if (!confirm(`A sprite named "${name}" already exists. Replace it?`))
         return null;
       setBoxes((prev) => prev.map((p, i) => i === duplicate ? nextBox : p));
-      setOriginalBoxes((prev) => prev.map((p, i) => i === duplicate ? nextBox : p));
+      const nextOriginalBoxes = originalBoxes.map((p, i) =>
+        i === duplicate ? nextOriginalBox : p,
+      );
+      setOriginalBoxes(nextOriginalBoxes);
+      if (!fixedSize && originalImg) {
+        void commitCanonicalAtlas(originalImg, nextOriginalBoxes, {
+          fixed: false,
+          clearSelection: false,
+        });
+      }
       return duplicate;
     }
     const index = boxes.length;
     setBoxes((prev) => [...prev, nextBox]);
-    setOriginalBoxes((prev) => [...prev, nextBox]);
+    const nextOriginalBoxes = [...originalBoxes, nextOriginalBox];
+    setOriginalBoxes(nextOriginalBoxes);
+    if (!fixedSize && originalImg) {
+      void commitCanonicalAtlas(originalImg, nextOriginalBoxes, {
+        fixed: false,
+        clearSelection: false,
+      });
+    }
     return index;
   };
 
@@ -259,17 +404,14 @@ export function useSpritePacker(): UseSpritePackerReturn {
       canvases,
       spacing,
       packerMode,
-      fixedSize ? atlasWidth : null,
-      fixedSize ? atlasHeight : null,
+      fixedSize ? toBaseDimension(atlasWidth, atlasScale) : null,
+      fixedSize ? toBaseDimension(atlasHeight, atlasScale) : null,
     );
     if (packed) {
       if (!img && firstFormat) setAtlasImageFormat(firstFormat);
-      setImg(packed.img);
       setOriginalImg(packed.img);
-      setBoxes(packed.boxes);
       setOriginalBoxes(packed.boxes);
-      setAtlasWidth(packed.img.width);
-      setAtlasHeight(packed.img.height);
+      await renderScaledAtlas(packed.img, packed.boxes);
       if ((!projectName || projectName === "project") && firstName)
         setProjectName(firstName);
       setBgMode("auto");
@@ -281,24 +423,18 @@ export function useSpritePacker(): UseSpritePackerReturn {
   const applyRepack = async (
     mode = packerMode,
     pad = spacing,
-    targetW = atlasWidth,
-    targetH = atlasHeight,
+    targetW = originalImg?.width ?? null,
+    targetH = originalImg?.height ?? null,
+    useFixed = fixedSize,
   ) => {
-    const repacked = await repackSprites(
+    if (!originalImg || !originalBoxes.length) return;
+    await commitCanonicalAtlas(originalImg, originalBoxes, {
       mode,
-      originalImg,
-      originalBoxes,
       pad,
-      fixedSize ? targetW : null,
-      fixedSize ? targetH : null,
-    );
-    if (repacked) {
-      setImg(repacked.img);
-      setBoxes(repacked.boxes);
-      setSelected(null);
-      setAtlasWidth(repacked.img.width);
-      setAtlasHeight(repacked.img.height);
-    }
+      fixed: useFixed,
+      targetW,
+      targetH,
+    });
   };
 
   const detectBoxesFromImage = (
@@ -361,23 +497,12 @@ export function useSpritePacker(): UseSpritePackerReturn {
       return;
     }
 
-    const repacked = await repackSprites(
-      nextPackerMode,
-      sourceImg,
-      detected,
-      spacing,
-      fixedSize ? atlasWidth : null,
-      fixedSize ? atlasHeight : null,
-    );
-    if (!repacked) return;
-
-    setOriginalImg(sourceImg);
-    setOriginalBoxes(detected);
-    setImg(repacked.img);
-    setBoxes(repacked.boxes);
-    setSelected(null);
-    setAtlasWidth(repacked.img.width);
-    setAtlasHeight(repacked.img.height);
+    await commitCanonicalAtlas(sourceImg, detected, {
+      mode: nextPackerMode,
+      fixed: fixedSize,
+      targetW: fixedSize ? sourceImg.width : null,
+      targetH: fixedSize ? sourceImg.height : null,
+    });
   };
 
   const handleDetect = async () => {
@@ -396,6 +521,10 @@ export function useSpritePacker(): UseSpritePackerReturn {
             );
       if (!next.length) {
         alert("No sprites found in uploaded file.");
+        return;
+      }
+      if (originalImg && next.some((box) => !isBoxInsideImage(box, originalImg))) {
+        alert("Custom sprite bounds must stay inside the atlas image.");
         return;
       }
       setBoxes(next);
@@ -449,60 +578,44 @@ export function useSpritePacker(): UseSpritePackerReturn {
         if (idx > 0) toRemove.add(item.idx);
       });
     });
-    const filteredBoxes = boxes.filter((_, i) => !toRemove.has(i));
-    setBoxes(filteredBoxes);
-    setOriginalBoxes(filteredBoxes);
+    const filteredBoxes = originalBoxes.filter((_, i) => !toRemove.has(i));
     await applyRepackWithBoxes(filteredBoxes);
   };
 
   const applyRepackWithBoxes = async (nextBoxes: ComponentBox[]) => {
-    const repacked = await repackSprites(
-      packerMode,
-      img,
-      nextBoxes,
-      spacing,
-      fixedSize ? atlasWidth : null,
-      fixedSize ? atlasHeight : null,
-    );
-    if (repacked) {
-      setImg(repacked.img);
-      setOriginalImg(repacked.img);
-      setBoxes(repacked.boxes);
-      setOriginalBoxes(repacked.boxes);
-      setSelected(null);
-      setAtlasWidth(repacked.img.width);
-      setAtlasHeight(repacked.img.height);
-    }
+    if (!originalImg) return;
+    await commitCanonicalAtlas(originalImg, nextBoxes, {
+      fixed: fixedSize,
+      targetW: originalImg.width,
+      targetH: originalImg.height,
+    });
   };
 
   const handleDelete = async () => {
     if (selected == null) return;
     const target = boxes[selected];
     const originalTarget = originalBoxes[selected] ?? target;
-    const nextBoxes = boxes.filter((_, i) => i !== selected);
     const nextOriginalBoxes = originalBoxes.filter((_, i) => i !== selected);
-    const [clearedImg, clearedOriginalImg] = await Promise.all([
-      img ? clearRegion(img, target) : Promise.resolve(null),
-      originalImg
-        ? clearRegion(originalImg, originalTarget)
-        : Promise.resolve(null),
-    ]);
+    const clearedOriginalImg = originalImg
+      ? await clearRegion(originalImg, originalTarget)
+      : null;
 
-    setBoxes(nextBoxes);
-    setOriginalBoxes(nextOriginalBoxes);
     setCustomBoxes((prev) =>
       prev ? prev.filter((_, i) => i !== selected) : prev,
     );
     setSelected(null);
-    if (clearedImg) setImg(clearedImg);
-    // The displayed atlas may have been repacked, so its coordinates are not
-    // necessarily the coordinates of the canonical source image.
-    if (clearedOriginalImg) setOriginalImg(clearedOriginalImg);
+    if (clearedOriginalImg) {
+      await commitCanonicalAtlas(clearedOriginalImg, nextOriginalBoxes, {
+        fixed: fixedSize,
+        targetW: originalImg?.width,
+        targetH: originalImg?.height,
+      });
+    }
   };
 
   const handleReplaceSelected = async (file: File) => {
-    if (selected == null || !boxes.length) return;
-    const target = boxes[selected];
+    if (selected == null || !originalBoxes.length || !originalImg) return;
+    const target = originalBoxes[selected];
     const nextImg = await loadImageFromFile(file);
     const closeWidth = Math.abs(nextImg.width - target.w) <= 1;
     const closeHeight = Math.abs(nextImg.height - target.h) <= 1;
@@ -512,21 +625,12 @@ export function useSpritePacker(): UseSpritePackerReturn {
       );
       return;
     }
-    if (
-      target.x + nextImg.width > (img?.width ?? 0) ||
-      target.y + nextImg.height > (img?.height ?? 0)
-    ) {
-      alert("Replacement image does not fit inside the atlas bounds.");
-      return;
-    }
-
     const redrawWithReplacement = async (
-      base: HTMLImageElement | null,
+      base: HTMLImageElement,
     ): Promise<HTMLImageElement | null> => {
-      if (!base) return null;
       const c = document.createElement("canvas");
-      c.width = base.width;
-      c.height = base.height;
+      c.width = Math.max(base.width, target.x + nextImg.width);
+      c.height = Math.max(base.height, target.y + nextImg.height);
       const ctx = c.getContext("2d");
       if (!ctx) return null;
       ctx.drawImage(base, 0, 0);
@@ -535,22 +639,10 @@ export function useSpritePacker(): UseSpritePackerReturn {
       return await imageFromCanvas(c);
     };
 
-    const [nextAtlas, nextOriginal] = await Promise.all([
-      redrawWithReplacement(img),
-      redrawWithReplacement(originalImg),
-    ]);
-
-    if (nextAtlas) setImg(nextAtlas);
-    if (nextOriginal) setOriginalImg(nextOriginal);
-
-    const updated = boxes.map((b, i) =>
+    const nextOriginal = await redrawWithReplacement(originalImg);
+    if (!nextOriginal) return;
+    const updated = originalBoxes.map((b, i) =>
       i === selected ? { ...b, w: nextImg.width, h: nextImg.height } : b,
-    );
-    setBoxes(updated);
-    setOriginalBoxes((prev) =>
-      prev.map((b, i) =>
-        i === selected ? { ...b, w: nextImg.width, h: nextImg.height } : b,
-      ),
     );
     setCustomBoxes((prev) =>
       prev
@@ -559,13 +651,19 @@ export function useSpritePacker(): UseSpritePackerReturn {
           )
         : prev,
     );
+    await commitCanonicalAtlas(nextOriginal, updated, {
+      fixed: fixedSize,
+      targetW: originalImg.width,
+      targetH: originalImg.height,
+      clearSelection: false,
+    });
   };
 
   const handleFitSelected = async () => {
-    if (selected == null || !boxes.length || !img) return;
-    const target = boxes[selected];
+    if (selected == null || !originalBoxes.length || !originalImg) return;
+    const target = originalBoxes[selected];
     const fitted = detectFittedBoundsForBox(
-      img,
+      originalImg,
       target,
       detector,
       bgMode,
@@ -576,44 +674,37 @@ export function useSpritePacker(): UseSpritePackerReturn {
       return;
     }
     const nextBox: ComponentBox = { ...target, ...fitted };
-    if (!isBoxInsideImage(nextBox, img)) {
+    if (!isBoxInsideImage(nextBox, originalImg)) {
       alert("Fitted sprite bounds must stay inside the atlas image.");
       return;
     }
-    if (originalImg && !isBoxInsideImage(nextBox, originalImg)) {
-      alert("Fitted sprite bounds must stay inside the atlas image.");
-      return;
-    }
-
-    setBoxes((prev) => prev.map((b, i) => (i === selected ? nextBox : b)));
-    setOriginalBoxes((prev) =>
-      prev.map((b, i) => (i === selected ? nextBox : b)),
+    const nextBoxes = originalBoxes.map((b, i) =>
+      i === selected ? nextBox : b,
     );
+    if (boxesOverlap(nextBoxes)) {
+      alert("Fitted sprite bounds overlap another sprite.");
+      return;
+    }
     setCustomBoxes((prev) =>
       prev ? prev.map((b, i) => (i === selected ? nextBox : b)) : prev,
     );
+    await commitCanonicalAtlas(originalImg, nextBoxes, {
+      fixed: fixedSize,
+      targetW: originalImg.width,
+      targetH: originalImg.height,
+      clearSelection: false,
+    });
   };
 
   const handleRotateSelected = async (direction: "left" | "right") => {
-    if (selected == null || !boxes.length || !img) return;
-    const repacked = await repackSprites(
-      packerMode,
-      img,
-      boxes,
-      spacing,
-      img.width,
-      img.height,
-      { rotate: { index: selected, direction } },
-    );
-    if (!repacked) return;
-
-    setImg(repacked.img);
-    setOriginalImg(repacked.img);
-    setBoxes(repacked.boxes);
-    setOriginalBoxes(repacked.boxes);
-    setCustomBoxes((prev) => (prev ? repacked.boxes : prev));
-    setAtlasWidth(repacked.img.width);
-    setAtlasHeight(repacked.img.height);
+    if (selected == null || !originalBoxes.length || !originalImg) return;
+    await commitCanonicalAtlas(originalImg, originalBoxes, {
+      fixed: fixedSize,
+      targetW: originalImg.width,
+      targetH: originalImg.height,
+      rotate: { index: selected, direction },
+      clearSelection: false,
+    });
   };
 
   const handleClear = () => {
@@ -698,7 +789,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       version: "SpritePacker v.1.0.0",
       image: imageName,
       size: { w: img.width, h: img.height },
-      scale: 1,
+      scale: atlasScale / 100,
     };
     if (jsonFormat === "unity") {
       const dataName = `${baseName}.atlas`;
@@ -743,23 +834,79 @@ export function useSpritePacker(): UseSpritePackerReturn {
   ) => {
     setPackerMode(mode);
     if (originalImg && originalBoxes.length) {
-      await applyRepack(mode, pad, atlasWidth, atlasHeight);
+      await applyRepack(
+        mode,
+        pad,
+        originalImg.width,
+        originalImg.height,
+        fixedSize,
+      );
       return;
     }
     await detectAndRepackForMode(mode);
   };
 
   const onAtlasWidthChange = async (v: number | null) => {
-    setAtlasWidth(v);
-    await applyRepack(packerMode, spacing, v, atlasHeight);
+    if (!fixedSize) return;
+    if (v == null || !originalImg) {
+      setAtlasWidth(v);
+      return;
+    }
+    await applyRepack(
+      packerMode,
+      spacing,
+      toBaseDimension(v, atlasScale),
+      originalImg.height,
+      true,
+    );
   };
   const onAtlasHeightChange = async (v: number | null) => {
-    setAtlasHeight(v);
-    await applyRepack(packerMode, spacing, atlasWidth, v);
+    if (!fixedSize) return;
+    if (v == null || !originalImg) {
+      setAtlasHeight(v);
+      return;
+    }
+    await applyRepack(
+      packerMode,
+      spacing,
+      originalImg.width,
+      toBaseDimension(v, atlasScale),
+      true,
+    );
   };
   const onFixedSizeChange = async (v: boolean) => {
-    setFixedSize(v);
-    await applyRepack(packerMode, spacing, atlasWidth, atlasHeight);
+    if (!v) return;
+    setFixedSize(true);
+    if (!originalImg) {
+      setAtlasWidth((current) => current ?? 2048);
+      setAtlasHeight((current) => current ?? 2048);
+      return;
+    }
+    await applyRepack(
+      packerMode,
+      spacing,
+      originalImg?.width ?? null,
+      originalImg?.height ?? null,
+      true,
+    );
+  };
+  const onAutoSizeChange = async (v: boolean) => {
+    if (!v) return;
+    setFixedSize(false);
+    if (!originalImg) {
+      setAtlasWidth(null);
+      setAtlasHeight(null);
+      return;
+    }
+    await applyRepack(packerMode, spacing, null, null, false);
+  };
+  const onAtlasScaleChange = async (v: number) => {
+    const next = clampAtlasScale(v);
+    atlasScaleRef.current = next;
+    setAtlasScale(next);
+    if (originalImg && originalBoxes.length) {
+      await renderScaledAtlas(originalImg, originalBoxes, next);
+    }
   };
 
   const selectedBox = selected != null ? boxes[selected] : null;
@@ -776,6 +923,8 @@ export function useSpritePacker(): UseSpritePackerReturn {
     atlasWidth,
     atlasHeight,
     fixedSize,
+    autoSize: !fixedSize,
+    atlasScale,
     downloadMode,
     atlasImageFormat,
     archive,
@@ -798,72 +947,72 @@ export function useSpritePacker(): UseSpritePackerReturn {
     onClearAll: handleClear,
     onUpdateSelected: async (next, applyToImage = false) => {
       if (selected == null || !selectedBox) return;
-      const nextBox: ComponentBox = { ...selectedBox, ...next, name: next.name?.trim() };
-      const duplicateIndex = nextBox.name
+      const nextDisplayBox: ComponentBox = {
+        ...selectedBox,
+        ...next,
+        name: next.name?.trim(),
+      };
+      const duplicateIndex = nextDisplayBox.name
         ? boxes.findIndex(
             (box, index) =>
               index !== selected &&
-              spriteNameKey(spriteName(box, index)) === spriteNameKey(nextBox.name || ""),
+              spriteNameKey(spriteName(box, index)) ===
+                spriteNameKey(nextDisplayBox.name || ""),
           )
         : -1;
       if (
         duplicateIndex >= 0 &&
-        !confirm(`A sprite named "${nextBox.name}" already exists. Replace it?`)
+        !confirm(
+          `A sprite named "${nextDisplayBox.name}" already exists. Replace it?`,
+        )
       ) {
         return;
       }
-      const geometryChanged =
-        selectedBox.x !== nextBox.x ||
-        selectedBox.y !== nextBox.y ||
-        selectedBox.w !== nextBox.w ||
-        selectedBox.h !== nextBox.h;
+      const overlapCandidates = boxes
+        .map((box, index) => (index === selected ? nextDisplayBox : box))
+        .filter((_, index) => index !== duplicateIndex);
+      if (boxesOverlap(overlapCandidates)) {
+        alert("Updated sprite bounds overlap another sprite.");
+        return;
+      }
 
-      let nextAtlas: HTMLImageElement | null = img;
+      const originalSelected = originalBoxes[selected];
+      if (!originalSelected || !originalImg) return;
+      const displayGeometryChanged =
+        selectedBox.x !== nextDisplayBox.x ||
+        selectedBox.y !== nextDisplayBox.y ||
+        selectedBox.w !== nextDisplayBox.w ||
+        selectedBox.h !== nextDisplayBox.h;
+      const nextBox = displayGeometryChanged
+        ? unscaleBox(nextDisplayBox, atlasScale / 100)
+        : { ...originalSelected, name: nextDisplayBox.name };
+      const geometryChanged =
+        originalSelected.x !== nextBox.x ||
+        originalSelected.y !== nextBox.y ||
+        originalSelected.w !== nextBox.w ||
+        originalSelected.h !== nextBox.h;
+
+      if (!isBoxInsideImage(nextBox, originalImg)) {
+        alert("Updated sprite bounds must stay inside the atlas image.");
+        return;
+      }
+
       let nextOriginal: HTMLImageElement | null = originalImg;
       if (applyToImage && geometryChanged) {
-        if (img && !isBoxInsideImage(nextBox, img)) {
-          alert("Updated sprite bounds must stay inside the atlas image.");
-          return;
-        }
-        if (originalImg && !isBoxInsideImage(nextBox, originalImg)) {
-          alert("Updated sprite bounds must stay inside the atlas image.");
-          return;
-        }
-
-        [nextAtlas, nextOriginal] = await Promise.all([
-          img
-            ? transformImageRegion(img, selectedBox, nextBox)
-            : Promise.resolve(null),
-          originalImg
-            ? transformImageRegion(originalImg, selectedBox, nextBox)
-            : Promise.resolve(null),
-        ]);
-
-        if (img && !nextAtlas) {
-          alert("Could not apply sprite changes to atlas image.");
-          return;
-        }
-        if (originalImg && !nextOriginal) {
+        nextOriginal = await transformImageRegion(
+          originalImg,
+          originalSelected,
+          nextBox,
+        );
+        if (!nextOriginal) {
           alert("Could not apply sprite changes to source image.");
           return;
         }
       }
 
       if (duplicateIndex >= 0) {
-        const duplicateBox = boxes[duplicateIndex];
-        const duplicateOriginalBox = originalBoxes[duplicateIndex] ?? duplicateBox;
-        const sharedImage =
-          nextAtlas === nextOriginal &&
-          duplicateBox.x === duplicateOriginalBox.x &&
-          duplicateBox.y === duplicateOriginalBox.y &&
-          duplicateBox.w === duplicateOriginalBox.w &&
-          duplicateBox.h === duplicateOriginalBox.h;
-        if (nextAtlas) {
-          nextAtlas = await clearRegionPreservingBox(nextAtlas, duplicateBox, nextBox);
-        }
-        if (sharedImage) {
-          nextOriginal = nextAtlas;
-        } else if (nextOriginal) {
+        const duplicateOriginalBox = originalBoxes[duplicateIndex];
+        if (nextOriginal && duplicateOriginalBox) {
           nextOriginal = await clearRegionPreservingBox(
             nextOriginal,
             duplicateOriginalBox,
@@ -871,21 +1020,26 @@ export function useSpritePacker(): UseSpritePackerReturn {
           );
         }
       }
-      if (nextAtlas !== img) setImg(nextAtlas);
-      if (nextOriginal !== originalImg) setOriginalImg(nextOriginal);
-
-      setBoxes((prev) =>
-        prev.map((b, i) => (i === selected ? nextBox : b)).filter((_, i) => i !== duplicateIndex),
-      );
-      setOriginalBoxes((prev) =>
-        prev.map((b, i) => (i === selected ? nextBox : b)).filter((_, i) => i !== duplicateIndex),
-      );
+      if (!nextOriginal) return;
+      const nextOriginalBoxes = originalBoxes
+        .map((box, index) => (index === selected ? nextBox : box))
+        .filter((_, index) => index !== duplicateIndex);
       setCustomBoxes((prev) =>
         prev
-          ? prev.map((b, i) => (i === selected ? nextBox : b)).filter((_, i) => i !== duplicateIndex)
+          ? prev
+              .map((box, index) => (index === selected ? nextBox : box))
+              .filter((_, index) => index !== duplicateIndex)
           : prev,
       );
-      if (duplicateIndex >= 0 && duplicateIndex < selected) setSelected(selected - 1);
+      await commitCanonicalAtlas(nextOriginal, nextOriginalBoxes, {
+        fixed: fixedSize,
+        targetW: originalImg.width,
+        targetH: originalImg.height,
+        clearSelection: false,
+      });
+      if (duplicateIndex >= 0 && duplicateIndex < selected) {
+        setSelected(selected - 1);
+      }
     },
     onReplaceSelected: handleReplaceSelected,
     onFitSelected: handleFitSelected,
@@ -894,11 +1048,19 @@ export function useSpritePacker(): UseSpritePackerReturn {
     onAtlasWidth: onAtlasWidthChange,
     onAtlasHeight: onAtlasHeightChange,
     onFixedSize: onFixedSizeChange,
+    onAutoSize: onAutoSizeChange,
+    onAtlasScale: onAtlasScaleChange,
     onJsonFormat: setJsonFormat,
     onSpacing: async (v: number) => {
       const next = Number.isNaN(v) ? 5 : Math.max(5, v);
       setSpacing(next);
-      await applyRepack(packerMode, next, atlasWidth, atlasHeight);
+      await applyRepack(
+        packerMode,
+        next,
+        originalImg?.width ?? null,
+        originalImg?.height ?? null,
+        fixedSize,
+      );
     },
     onDetectDuplicates: detectDuplicates,
     onDeleteDuplicates: deleteDuplicates,
@@ -940,6 +1102,69 @@ export function useSpritePacker(): UseSpritePackerReturn {
   };
 
   return { state, actions };
+}
+
+function clampAtlasScale(value: number): number {
+  if (!Number.isFinite(value)) return 100;
+  return Math.min(800, Math.max(10, Math.round(value)));
+}
+
+function scaleBox(box: ComponentBox, scale: number): ComponentBox {
+  const x = Math.round(box.x * scale);
+  const y = Math.round(box.y * scale);
+  const right = Math.round((box.x + box.w) * scale);
+  const bottom = Math.round((box.y + box.h) * scale);
+  return {
+    ...box,
+    x,
+    y,
+    w: Math.max(1, right - x),
+    h: Math.max(1, bottom - y),
+  };
+}
+
+function unscaleBox(box: ComponentBox, scale: number): ComponentBox {
+  const safeScale = scale > 0 ? scale : 1;
+  const x = Math.round(box.x / safeScale);
+  const y = Math.round(box.y / safeScale);
+  const right = Math.round((box.x + box.w) / safeScale);
+  const bottom = Math.round((box.y + box.h) / safeScale);
+  return {
+    ...box,
+    x,
+    y,
+    w: Math.max(1, right - x),
+    h: Math.max(1, bottom - y),
+  };
+}
+
+function fitBoxInsideImage(
+  box: ComponentBox,
+  image: HTMLImageElement,
+): ComponentBox {
+  const x = Math.max(0, Math.min(image.width - 1, box.x));
+  const y = Math.max(0, Math.min(image.height - 1, box.y));
+  return {
+    ...box,
+    x,
+    y,
+    w: Math.max(1, Math.min(box.w, image.width - x)),
+    h: Math.max(1, Math.min(box.h, image.height - y)),
+  };
+}
+
+function toBaseDimension(value: number | null, scalePercent: number): number | null {
+  if (value == null) return null;
+  return Math.max(1, Math.round(value / (clampAtlasScale(scalePercent) / 100)));
+}
+
+function boxesOverlap(boxes: ComponentBox[]): boolean {
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      if (overlaps(boxes[i], boxes[j])) return true;
+    }
+  }
+  return false;
 }
 
 function toHash(
@@ -1250,6 +1475,41 @@ async function packCanvases(
 ): Promise<{ img: HTMLImageElement; boxes: ComponentBox[] } | null> {
   if (!items.length) return null;
   const pad = Math.max(5, spacing);
+  if (mode === "optimal") {
+    const packed = findOptimalShelfPacking(items, pad, targetW);
+    if (!packed) return null;
+    const atlasW = targetW && targetW > 0
+      ? Math.max(packed.w, targetW)
+      : packed.w;
+    const atlasH = targetH && targetH > 0
+      ? Math.max(packed.h, targetH)
+      : packed.h;
+    const canvas = document.createElement("canvas");
+    canvas.width = atlasW;
+    canvas.height = atlasH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    packed.placements.forEach(({ item, x, y }) => {
+      ctx.drawImage(item.canvas, x, y, item.w, item.h);
+    });
+    const outImg = await loadImageFromCanvas(canvas);
+    const outBoxes = [...packed.placements]
+      .sort((a, b) => a.index - b.index)
+      .map(({ item, x, y }, index) => ({
+        id: index + 1,
+        name: item.name || `sprite-${index + 1}`,
+        x,
+        y,
+        w: item.w,
+        h: item.h,
+      }));
+    items.forEach((item) => {
+      item.canvas.width = 0;
+      item.canvas.height = 0;
+    });
+    return { img: outImg, boxes: outBoxes };
+  }
+
   const totalArea = items.reduce((s, b) => s + b.w * b.h, 0);
   const minWidth = Math.max(...items.map((b) => b.w));
   const sqrtW = Math.floor(Math.sqrt(totalArea));
@@ -1259,6 +1519,11 @@ async function packCanvases(
     Math.max(minWidth, sqrtW + pad),
     Math.max(minWidth, sqrtW - pad),
   ]);
+  let cumulativeWidth = 0;
+  for (const item of items) {
+    cumulativeWidth += (cumulativeWidth > 0 ? pad : 0) + item.w;
+    candidates.add(Math.max(minWidth, cumulativeWidth));
+  }
   if (targetW && targetW > 0) candidates.add(Math.max(minWidth, targetW));
   let best: {
     placements: {
@@ -1291,7 +1556,6 @@ async function packCanvases(
     const ordered = items
       .map((item, idx) => ({ ...item, idx }))
       .sort((a, b) => {
-        if (mode === "optimal") return b.h - a.h || b.w - a.w;
         if (mode === "maxrect") return b.w * b.h > a.w * a.h ? -1 : 1;
         return 0;
       });
@@ -1310,8 +1574,8 @@ async function packCanvases(
     const w = Math.max(width, maxRowW);
     if (
       !best ||
-      Math.abs(w - h) < Math.abs(best.w - best.h) ||
-      (Math.abs(w - h) === Math.abs(best.w - best.h) && w * h < best.w * best.h)
+      w * h < best.w * best.h ||
+      (w * h === best.w * best.h && Math.abs(w - h) < Math.abs(best.w - best.h))
     ) {
       best = { placements, w, h };
     }

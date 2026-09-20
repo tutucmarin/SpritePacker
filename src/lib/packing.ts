@@ -1,9 +1,11 @@
 import type { ComponentBox } from "./types";
 import { loadImageFromCanvas } from "./image-utils";
+import { findOptimalShelfPacking } from "./optimal-packing";
 
 type PackerMode = "default" | "optimal" | "maxrect";
 
 type RepackOptions = {
+  compact?: boolean;
   rotate?: {
     index: number;
     direction: "left" | "right";
@@ -20,7 +22,7 @@ export async function repackSprites(
   options: RepackOptions = {},
 ): Promise<{ img: HTMLImageElement; boxes: ComponentBox[] } | null> {
   if (!originalImg || !originalBoxes.length) return null;
-  if (mode === "default" && !options.rotate) {
+  if (mode === "default" && !options.rotate && !options.compact) {
     const requiredW = Math.max(...originalBoxes.map((box) => box.x + box.w));
     const requiredH = Math.max(...originalBoxes.map((box) => box.y + box.h));
     const atlasW = targetW && targetW > 0
@@ -75,7 +77,7 @@ export async function repackSprites(
   });
 
   crops.sort((a, b) => {
-    if (mode === "optimal") return b.h - a.h || b.w - a.w;
+    if (mode === "optimal") return 0;
     if (mode === "maxrect") {
       const areaA = a.w * a.h;
       const areaB = b.w * b.h;
@@ -84,17 +86,7 @@ export async function repackSprites(
     return a.idx - b.idx;
   });
 
-  const totalArea = crops.reduce((s, b) => s + b.w * b.h, 0);
   const pad = Math.max(0, spacing);
-  const minWidth = Math.max(...crops.map((b) => b.w));
-  const sqrtW = Math.floor(Math.sqrt(totalArea));
-  const candidates = new Set<number>([
-    minWidth,
-    Math.max(minWidth, sqrtW),
-    Math.max(minWidth, sqrtW + pad),
-    Math.max(minWidth, sqrtW - pad),
-  ]);
-  if (targetW && targetW > 0) candidates.add(Math.max(minWidth, targetW));
 
   let best:
     | {
@@ -104,35 +96,69 @@ export async function repackSprites(
       }
     | null = null;
 
-  for (const cand of candidates) {
-    const width = cand;
-    let x = 0;
-    let y = 0;
-    let rowH = 0;
-    let maxRowW = 0;
-    const placements: (ComponentBox & {
-      idx: number;
-      canvas: HTMLCanvasElement;
-    })[] = [];
-    for (const b of crops) {
-      if (x > 0 && x + b.w + pad > width) {
-        x = 0;
-        y += rowH + pad;
-        rowH = 0;
-      }
-      placements.push({ ...b, x, y });
-      x += b.w + pad;
-      rowH = Math.max(rowH, b.h);
-      maxRowW = Math.max(maxRowW, x - pad);
+  if (mode === "optimal") {
+    const packed = findOptimalShelfPacking(crops, pad, targetW);
+    if (packed) {
+      best = {
+        placements: packed.placements.map(({ item, x, y }) => ({
+          ...item,
+          x,
+          y,
+        })),
+        w: packed.w,
+        h: packed.h,
+      };
     }
-    const h = y + rowH;
-    const w = Math.max(width, maxRowW);
-    if (
-      !best ||
-      Math.abs(w - h) < Math.abs(best.w - best.h) ||
-      (Math.abs(w - h) === Math.abs(best.w - best.h) && w * h < best.w * best.h)
-    ) {
-      best = { placements, w, h };
+  }
+
+  if (mode !== "optimal") {
+    const totalArea = crops.reduce((s, b) => s + b.w * b.h, 0);
+    const minWidth = Math.max(...crops.map((b) => b.w));
+    const sqrtW = Math.floor(Math.sqrt(totalArea));
+    const candidates = new Set<number>([
+      minWidth,
+      Math.max(minWidth, sqrtW),
+      Math.max(minWidth, sqrtW + pad),
+      Math.max(minWidth, sqrtW - pad),
+    ]);
+    let cumulativeWidth = 0;
+    for (const crop of crops) {
+      cumulativeWidth += (cumulativeWidth > 0 ? pad : 0) + crop.w;
+      candidates.add(Math.max(minWidth, cumulativeWidth));
+    }
+    if (targetW && targetW > 0) candidates.add(Math.max(minWidth, targetW));
+
+    for (const cand of candidates) {
+      const width = cand;
+      let x = 0;
+      let y = 0;
+      let rowH = 0;
+      let maxRowW = 0;
+      const placements: (ComponentBox & {
+        idx: number;
+        canvas: HTMLCanvasElement;
+      })[] = [];
+      for (const b of crops) {
+        if (x > 0 && x + b.w + pad > width) {
+          x = 0;
+          y += rowH + pad;
+          rowH = 0;
+        }
+        placements.push({ ...b, x, y });
+        x += b.w + pad;
+        rowH = Math.max(rowH, b.h);
+        maxRowW = Math.max(maxRowW, x - pad);
+      }
+      const h = y + rowH;
+      const w = Math.max(width, maxRowW);
+      if (
+        !best ||
+        w * h < best.w * best.h ||
+        (w * h === best.w * best.h &&
+          Math.abs(w - h) < Math.abs(best.w - best.h))
+      ) {
+        best = { placements, w, h };
+      }
     }
   }
 

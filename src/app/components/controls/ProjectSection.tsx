@@ -12,6 +12,10 @@ type Props = {
   onAtlasHeight: (v: number | null) => void;
   fixedSize: boolean;
   onFixedSize: (v: boolean) => void;
+  autoSize: boolean;
+  onAutoSize: (v: boolean) => void;
+  atlasScale: number;
+  onAtlasScale: (v: number) => void;
   jsonFormat: JsonFormat;
   onJsonFormat: (v: JsonFormat) => void;
   onClearAll: () => void;
@@ -45,6 +49,10 @@ export function ProjectSection({
   onAtlasHeight,
   fixedSize,
   onFixedSize,
+  autoSize,
+  onAutoSize,
+  atlasScale,
+  onAtlasScale,
   jsonFormat,
   onJsonFormat,
   onClearAll,
@@ -93,12 +101,28 @@ export function ProjectSection({
         </div>
       </div>
       <div className="setting-row" style={{ marginTop: 6 }}>
+        <span className="label">Scale (%)</span>
+        <div className="control">
+          <input
+            type="number"
+            value={atlasScale}
+            min={10}
+            max={800}
+            step={1}
+            onChange={(e) =>
+              onAtlasScale(parseInt(e.target.value || "100", 10))
+            }
+          />
+        </div>
+      </div>
+      <div className="setting-row" style={{ marginTop: 6 }}>
         <span className="label">Width</span>
         <div className="control">
           <input
             type="number"
             value={atlasWidth ?? ""}
             min={1}
+            disabled={autoSize}
             onChange={(e) =>
               onAtlasWidth(
                 e.target.value === ""
@@ -116,6 +140,7 @@ export function ProjectSection({
             type="number"
             value={atlasHeight ?? ""}
             min={1}
+            disabled={autoSize}
             onChange={(e) =>
               onAtlasHeight(
                 e.target.value === ""
@@ -127,12 +152,24 @@ export function ProjectSection({
         </div>
       </div>
       <div className="setting-row" style={{ marginTop: 6 }}>
+        <span className="label">Auto size</span>
+        <div className="control">
+          <input
+            type="radio"
+            name="atlas-size-mode"
+            checked={autoSize}
+            onChange={() => onAutoSize(true)}
+          />
+        </div>
+      </div>
+      <div className="setting-row" style={{ marginTop: 6 }}>
         <span className="label">Fixed size</span>
         <div className="control">
           <input
-            type="checkbox"
+            type="radio"
+            name="atlas-size-mode"
             checked={fixedSize}
-            onChange={(e) => onFixedSize(e.target.checked)}
+            onChange={() => onFixedSize(true)}
           />
         </div>
       </div>
