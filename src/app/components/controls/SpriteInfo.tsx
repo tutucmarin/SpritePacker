@@ -1,5 +1,6 @@
 import { ComponentBox } from "@/src/lib/types";
 import { useEffect, useRef, useState } from "react";
+import { CommittedNumberInput } from "@/src/app/components/controls/CommittedNumberInput";
 
 type Props = {
   box: ComponentBox | null;
@@ -67,8 +68,8 @@ export function SpriteInfo({
           <div className="setting-row" style={{ marginTop: 8 }}>
             <span className="label">Position</span>
             <div className="control sprite-bounds">
-              <NumberInput label="x" value={x} onChange={setX} />
-              <NumberInput label="y" value={y} onChange={setY} />
+              <NumberInput label="x" value={x} onChange={setX} min={0} />
+              <NumberInput label="y" value={y} onChange={setY} min={0} />
             </div>
           </div>
           <div className="setting-row" style={{ marginTop: 8 }}>
@@ -197,11 +198,10 @@ function NumberInput({
   return (
     <label className="sprite-metric">
       {label}
-      <input
-        type="number"
+      <CommittedNumberInput
         value={value}
         min={min}
-        onChange={(e) => onChange(parseInt(e.target.value || "0", 10))}
+        onCommit={onChange}
       />
     </label>
   );

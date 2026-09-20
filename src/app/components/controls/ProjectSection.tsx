@@ -1,3 +1,5 @@
+import { CommittedNumberInput } from "@/src/app/components/controls/CommittedNumberInput";
+
 type Props = {
   projectName: string;
   onProjectName: (v: string) => void;
@@ -92,62 +94,44 @@ export function ProjectSection({
       <div className="setting-row" style={{ marginTop: 6 }}>
         <span className="label">Spacing</span>
         <div className="control">
-          <input
-            type="number"
+          <CommittedNumberInput
             value={spacing}
             min={5}
-            onChange={(e) => onSpacing(parseInt(e.target.value || "0", 10))}
+            onCommit={onSpacing}
           />
         </div>
       </div>
       <div className="setting-row" style={{ marginTop: 6 }}>
         <span className="label">Scale (%)</span>
         <div className="control">
-          <input
-            type="number"
+          <CommittedNumberInput
             value={atlasScale}
             min={10}
             max={800}
             step={1}
-            onChange={(e) =>
-              onAtlasScale(parseInt(e.target.value || "100", 10))
-            }
+            onCommit={onAtlasScale}
           />
         </div>
       </div>
       <div className="setting-row" style={{ marginTop: 6 }}>
         <span className="label">Width</span>
         <div className="control">
-          <input
-            type="number"
-            value={atlasWidth ?? ""}
+          <CommittedNumberInput
+            value={atlasWidth}
             min={1}
             disabled={autoSize}
-            onChange={(e) =>
-              onAtlasWidth(
-                e.target.value === ""
-                  ? null
-                  : parseInt(e.target.value || "0", 10),
-              )
-            }
+            onCommit={onAtlasWidth}
           />
         </div>
       </div>
       <div className="setting-row" style={{ marginTop: 6 }}>
         <span className="label">Height</span>
         <div className="control">
-          <input
-            type="number"
-            value={atlasHeight ?? ""}
+          <CommittedNumberInput
+            value={atlasHeight}
             min={1}
             disabled={autoSize}
-            onChange={(e) =>
-              onAtlasHeight(
-                e.target.value === ""
-                  ? null
-                  : parseInt(e.target.value || "0", 10),
-              )
-            }
+            onCommit={onAtlasHeight}
           />
         </div>
       </div>

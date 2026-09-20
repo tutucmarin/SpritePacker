@@ -330,6 +330,28 @@ export function useSpritePacker(): UseSpritePackerReturn {
 
   const handleFiles = async (files?: File[]) => {
     if (!files || !files.length) return;
+
+    // A custom atlas description may be selected before its image. In that
+    // case the single image is the atlas itself, not a sprite to be packed.
+    if (!originalImg && customBoxes?.length && files.length === 1) {
+      const file = files[0];
+      const atlas = await loadImageFromFile(file);
+      if (customBoxes.some((box) => !isBoxInsideImage(box, atlas))) {
+        alert("Custom sprite bounds must stay inside the atlas image.");
+        return;
+      }
+      setAtlasImageFormat(atlasFormatFromFile(file));
+      setOriginalImg(atlas);
+      setOriginalBoxes(customBoxes);
+      await renderScaledAtlas(atlas, customBoxes);
+      const name = file.name.replace(/\.[^.]+$/, "").trim();
+      if ((!projectName || projectName === "project") && name) {
+        setProjectName(name);
+      }
+      setSelected(null);
+      return;
+    }
+
     const canvases: {
       canvas: HTMLCanvasElement;
       w: number;
@@ -482,7 +504,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
     let detected: ComponentBox[];
     if (mode === "custom") {
       if (customBoxes && customBoxes.length) {
-        detected = filterNonOverlapping(customBoxes);
+        detected = customBoxes;
       } else {
         mode = "auto";
         setBgMode("auto");
@@ -515,10 +537,8 @@ export function useSpritePacker(): UseSpritePackerReturn {
       const text = await file.text();
       const next =
         jsonFormat === "unity"
-          ? filterNonOverlapping(parseUnityAtlas(text))
-          : filterNonOverlapping(
-              parseCustomSprites(JSON.parse(text), jsonFormat),
-            );
+          ? parseUnityAtlas(text)
+          : parseCustomSprites(JSON.parse(text), jsonFormat);
       if (!next.length) {
         alert("No sprites found in uploaded file.");
         return;
@@ -527,14 +547,15 @@ export function useSpritePacker(): UseSpritePackerReturn {
         alert("Custom sprite bounds must stay inside the atlas image.");
         return;
       }
-      setBoxes(next);
       setOriginalBoxes(next);
       setCustomBoxes(next);
       setSelected(null);
-      try {
-        await applyRepackWithBoxes(next);
-      } catch (err) {
-        console.error(err);
+      if (originalImg) {
+        // Import is metadata-only: keep the uploaded atlas pixels and canvas
+        // dimensions untouched until the user explicitly requests a repack.
+        await renderScaledAtlas(originalImg, next);
+      } else {
+        setBoxes(next);
       }
     } catch (err) {
       console.error(err);
@@ -779,10 +800,15 @@ export function useSpritePacker(): UseSpritePackerReturn {
     const frames = ordered.map((b, i) => ({
       filename: (b.name && b.name.trim()) || `sprite-${i + 1}`,
       frame: { x: b.x, y: b.y, w: b.w, h: b.h },
-      rotated: false,
-      trimmed: false,
-      spriteSourceSize: { x: 0, y: 0, w: b.w, h: b.h },
-      sourceSize: { w: b.w, h: b.h },
+      rotated: b.rotated ?? false,
+      trimmed: b.trimmed ?? false,
+      spriteSourceSize: b.spriteSourceSize ?? {
+        x: 0,
+        y: 0,
+        w: b.w,
+        h: b.h,
+      },
+      sourceSize: b.sourceSize ?? { w: b.w, h: b.h },
     }));
     const meta = {
       app: "{http://spritepacker.app/}",
@@ -1120,6 +1146,15 @@ function scaleBox(box: ComponentBox, scale: number): ComponentBox {
     y,
     w: Math.max(1, right - x),
     h: Math.max(1, bottom - y),
+    spriteSourceSize: box.spriteSourceSize
+      ? scaleRect(box.spriteSourceSize, scale)
+      : undefined,
+    sourceSize: box.sourceSize
+      ? {
+          w: Math.max(1, Math.round(box.sourceSize.w * scale)),
+          h: Math.max(1, Math.round(box.sourceSize.h * scale)),
+        }
+      : undefined,
   };
 }
 
@@ -1131,6 +1166,31 @@ function unscaleBox(box: ComponentBox, scale: number): ComponentBox {
   const bottom = Math.round((box.y + box.h) / safeScale);
   return {
     ...box,
+    x,
+    y,
+    w: Math.max(1, right - x),
+    h: Math.max(1, bottom - y),
+    spriteSourceSize: box.spriteSourceSize
+      ? scaleRect(box.spriteSourceSize, 1 / safeScale)
+      : undefined,
+    sourceSize: box.sourceSize
+      ? {
+          w: Math.max(1, Math.round(box.sourceSize.w / safeScale)),
+          h: Math.max(1, Math.round(box.sourceSize.h / safeScale)),
+        }
+      : undefined,
+  };
+}
+
+function scaleRect(
+  rect: { x: number; y: number; w: number; h: number },
+  scale: number,
+) {
+  const x = Math.round(rect.x * scale);
+  const y = Math.round(rect.y * scale);
+  const right = Math.round((rect.x + rect.w) * scale);
+  const bottom = Math.round((rect.y + rect.h) * scale);
+  return {
     x,
     y,
     w: Math.max(1, right - x),
@@ -1188,23 +1248,13 @@ function parseUnityAtlas(text: string): ComponentBox[] {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const boxes: ComponentBox[] = [];
   let pageSeen = false;
-  let current: {
-    name: string;
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-  } | null = null;
+  let current: ComponentBox | null = null;
 
   const flush = () => {
     if (current && current.w > 0 && current.h > 0) {
       boxes.push({
+        ...current,
         id: boxes.length + 1,
-        name: current.name,
-        x: current.x,
-        y: current.y,
-        w: current.w,
-        h: current.h,
       });
     }
   };
@@ -1220,7 +1270,7 @@ function parseUnityAtlas(text: string): ComponentBox[] {
         continue;
       }
       flush();
-      current = { name: line, x: 0, y: 0, w: 0, h: 0 };
+      current = { name: line, x: 0, y: 0, w: 0, h: 0, rotated: false };
       continue;
     }
 
@@ -1235,6 +1285,14 @@ function parseUnityAtlas(text: string): ComponentBox[] {
       const [w, h] = value.split(",").map((n) => parseInt(n.trim(), 10) || 0);
       current.w = w;
       current.h = h;
+    } else if (key === "rotate") {
+      current.rotated = parseRotation(value);
+    } else if (key === "orig") {
+      const [w, h] = value.split(",").map((n) => parseInt(n.trim(), 10) || 0);
+      if (w > 0 && h > 0) current.sourceSize = { w, h };
+    } else if (key === "offset") {
+      const [x, y] = value.split(",").map((n) => parseInt(n.trim(), 10) || 0);
+      current.spriteSourceSize = { x, y, w: current.w, h: current.h };
     }
   }
   flush();
@@ -1254,6 +1312,7 @@ function parseCustomSprites(data: any, format: JsonFormat): ComponentBox[] {
         y: e.frame.y ?? 0,
         w: e.frame.w ?? 0,
         h: e.frame.h ?? 0,
+        ...parseImportedFrameMetadata(e),
       }))
       .filter((b) => b.w > 0 && b.h > 0);
   }
@@ -1276,6 +1335,7 @@ function parseCustomSprites(data: any, format: JsonFormat): ComponentBox[] {
           y: frame.y ?? 0,
           w: frame.w ?? 0,
           h: frame.h ?? 0,
+          ...parseImportedFrameMetadata(e),
         };
       })
       .filter((b) => b.w > 0 && b.h > 0);
@@ -1295,10 +1355,51 @@ function parseCustomSprites(data: any, format: JsonFormat): ComponentBox[] {
         y: e.frame?.y ?? e.y ?? 0,
         w: e.frame?.w ?? e.w ?? 0,
         h: e.frame?.h ?? e.h ?? 0,
+        ...parseImportedFrameMetadata(e),
       }))
       .filter((b) => b.w > 0 && b.h > 0);
   }
   return [];
+}
+
+function parseImportedFrameMetadata(entry: any): Pick<
+  ComponentBox,
+  "rotated" | "trimmed" | "spriteSourceSize" | "sourceSize"
+> {
+  return {
+    rotated: parseRotation(entry?.rotated ?? entry?.rotate),
+    trimmed: Boolean(entry?.trimmed),
+    spriteSourceSize: parseRect(entry?.spriteSourceSize),
+    sourceSize: parseSize(entry?.sourceSize),
+  };
+}
+
+function parseRotation(value: unknown): boolean {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return !["", "0", "false", "none", "no"].includes(normalized);
+  }
+  return Boolean(value);
+}
+
+function parseRect(value: any) {
+  if (!value || typeof value !== "object") return undefined;
+  const x = Number(value.x);
+  const y = Number(value.y);
+  const w = Number(value.w);
+  const h = Number(value.h);
+  if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) {
+    return undefined;
+  }
+  return { x, y, w, h };
+}
+
+function parseSize(value: any) {
+  if (!value || typeof value !== "object") return undefined;
+  const w = Number(value.w);
+  const h = Number(value.h);
+  if (![w, h].every(Number.isFinite) || w <= 0 || h <= 0) return undefined;
+  return { w, h };
 }
 
 function detectFittedBoundsForBox(
@@ -1644,7 +1745,7 @@ function buildUnityAtlas(
 
   frames.forEach((f) => {
     lines.push(f.filename);
-    lines.push("  rotate: false");
+    lines.push(`  rotate: ${f.rotated ? "true" : "false"}`);
     lines.push(`  xy: ${f.frame.x}, ${f.frame.y}`);
     lines.push(`  size: ${f.frame.w}, ${f.frame.h}`);
     lines.push(`  orig: ${f.sourceSize.w}, ${f.sourceSize.h}`);
