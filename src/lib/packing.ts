@@ -3,6 +3,13 @@ import { loadImageFromCanvas } from "./image-utils";
 
 type PackerMode = "default" | "optimal" | "maxrect";
 
+type RepackOptions = {
+  rotate?: {
+    index: number;
+    direction: "left" | "right";
+  };
+};
+
 export async function repackSprites(
   mode: PackerMode,
   originalImg: HTMLImageElement | null,
@@ -10,26 +17,71 @@ export async function repackSprites(
   spacing = 0,
   targetW?: number | null,
   targetH?: number | null,
+  options: RepackOptions = {},
 ): Promise<{ img: HTMLImageElement; boxes: ComponentBox[] } | null> {
   if (!originalImg || !originalBoxes.length) return null;
-  if (mode === "default") {
-    return { img: originalImg, boxes: originalBoxes };
+  if (mode === "default" && !options.rotate) {
+    const requiredW = Math.max(...originalBoxes.map((box) => box.x + box.w));
+    const requiredH = Math.max(...originalBoxes.map((box) => box.y + box.h));
+    const atlasW = targetW && targetW > 0
+      ? Math.max(requiredW, targetW)
+      : originalImg.width;
+    const atlasH = targetH && targetH > 0
+      ? Math.max(requiredH, targetH)
+      : originalImg.height;
+    if (atlasW === originalImg.width && atlasH === originalImg.height) {
+      return { img: originalImg, boxes: originalBoxes };
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = atlasW;
+    canvas.height = atlasH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(originalImg, 0, 0);
+    return { img: await loadImageFromCanvas(canvas), boxes: originalBoxes };
   }
 
   const crops = originalBoxes.map((b, idx) => {
-    const c = document.createElement("canvas");
-    c.width = b.w;
-    c.height = b.h;
-    const ctx = c.getContext("2d")!;
-    ctx.drawImage(originalImg, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
-    return { ...b, idx, canvas: c };
+    const source = document.createElement("canvas");
+    source.width = b.w;
+    source.height = b.h;
+    const sourceCtx = source.getContext("2d")!;
+    sourceCtx.imageSmoothingEnabled = false;
+    sourceCtx.drawImage(originalImg, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
+
+    if (options.rotate?.index !== idx) {
+      return { ...b, idx, canvas: source };
+    }
+
+    const rotated = document.createElement("canvas");
+    rotated.width = b.h;
+    rotated.height = b.w;
+    const rotatedCtx = rotated.getContext("2d")!;
+    rotatedCtx.imageSmoothingEnabled = false;
+    rotatedCtx.save();
+    if (options.rotate.direction === "right") {
+      rotatedCtx.translate(rotated.width, 0);
+      rotatedCtx.rotate(Math.PI / 2);
+    } else {
+      rotatedCtx.translate(0, rotated.height);
+      rotatedCtx.rotate(-Math.PI / 2);
+    }
+    rotatedCtx.drawImage(source, 0, 0);
+    rotatedCtx.restore();
+    source.width = 0;
+    source.height = 0;
+    return { ...b, w: rotated.width, h: rotated.height, idx, canvas: rotated };
   });
 
   crops.sort((a, b) => {
     if (mode === "optimal") return b.h - a.h || b.w - a.w;
-    const areaA = a.w * a.h;
-    const areaB = b.w * b.h;
-    return areaB - areaA;
+    if (mode === "maxrect") {
+      const areaA = a.w * a.h;
+      const areaB = b.w * b.h;
+      return areaB - areaA;
+    }
+    return a.idx - b.idx;
   });
 
   const totalArea = crops.reduce((s, b) => s + b.w * b.h, 0);

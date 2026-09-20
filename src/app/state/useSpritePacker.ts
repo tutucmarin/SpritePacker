@@ -268,10 +268,8 @@ export function useSpritePacker(): UseSpritePackerReturn {
       setOriginalImg(packed.img);
       setBoxes(packed.boxes);
       setOriginalBoxes(packed.boxes);
-      if (!fixedSize) {
-        setAtlasWidth(packed.img.width);
-        setAtlasHeight(packed.img.height);
-      }
+      setAtlasWidth(packed.img.width);
+      setAtlasHeight(packed.img.height);
       if ((!projectName || projectName === "project") && firstName)
         setProjectName(firstName);
       setBgMode("auto");
@@ -298,10 +296,8 @@ export function useSpritePacker(): UseSpritePackerReturn {
       setImg(repacked.img);
       setBoxes(repacked.boxes);
       setSelected(null);
-      if (!fixedSize) {
-        setAtlasWidth(repacked.img.width);
-        setAtlasHeight(repacked.img.height);
-      }
+      setAtlasWidth(repacked.img.width);
+      setAtlasHeight(repacked.img.height);
     }
   };
 
@@ -380,10 +376,8 @@ export function useSpritePacker(): UseSpritePackerReturn {
     setImg(repacked.img);
     setBoxes(repacked.boxes);
     setSelected(null);
-    if (!fixedSize) {
-      setAtlasWidth(repacked.img.width);
-      setAtlasHeight(repacked.img.height);
-    }
+    setAtlasWidth(repacked.img.width);
+    setAtlasHeight(repacked.img.height);
   };
 
   const handleDetect = async () => {
@@ -476,27 +470,34 @@ export function useSpritePacker(): UseSpritePackerReturn {
       setBoxes(repacked.boxes);
       setOriginalBoxes(repacked.boxes);
       setSelected(null);
-      if (!fixedSize) {
-        setAtlasWidth(repacked.img.width);
-        setAtlasHeight(repacked.img.height);
-      }
+      setAtlasWidth(repacked.img.width);
+      setAtlasHeight(repacked.img.height);
     }
   };
 
   const handleDelete = async () => {
     if (selected == null) return;
     const target = boxes[selected];
-    setBoxes((prev) => prev.filter((_, i) => i !== selected));
-    setOriginalBoxes((prev) => prev.filter((_, i) => i !== selected));
+    const originalTarget = originalBoxes[selected] ?? target;
+    const nextBoxes = boxes.filter((_, i) => i !== selected);
+    const nextOriginalBoxes = originalBoxes.filter((_, i) => i !== selected);
+    const [clearedImg, clearedOriginalImg] = await Promise.all([
+      img ? clearRegion(img, target) : Promise.resolve(null),
+      originalImg
+        ? clearRegion(originalImg, originalTarget)
+        : Promise.resolve(null),
+    ]);
+
+    setBoxes(nextBoxes);
+    setOriginalBoxes(nextOriginalBoxes);
+    setCustomBoxes((prev) =>
+      prev ? prev.filter((_, i) => i !== selected) : prev,
+    );
     setSelected(null);
-    if (img) {
-      const cleared = await clearRegion(img, target);
-      setImg(cleared);
-    }
-    if (originalImg) {
-      const cleared = await clearRegion(originalImg, target);
-      setOriginalImg(cleared);
-    }
+    if (clearedImg) setImg(clearedImg);
+    // The displayed atlas may have been repacked, so its coordinates are not
+    // necessarily the coordinates of the canonical source image.
+    if (clearedOriginalImg) setOriginalImg(clearedOriginalImg);
   };
 
   const handleReplaceSelected = async (file: File) => {
@@ -595,49 +596,24 @@ export function useSpritePacker(): UseSpritePackerReturn {
 
   const handleRotateSelected = async (direction: "left" | "right") => {
     if (selected == null || !boxes.length || !img) return;
-    const target = boxes[selected];
-    const rotated = getCenteredRotatedBox(target, img.width, img.height);
-    if (!rotated) {
-      alert("This sprite cannot be rotated inside the current atlas bounds.");
-      return;
-    }
-
-    const placed = findNonOverlappingPlacement(
-      rotated,
+    const repacked = await repackSprites(
+      packerMode,
+      img,
       boxes,
-      selected,
+      spacing,
       img.width,
       img.height,
+      { rotate: { index: selected, direction } },
     );
-    if (!placed) {
-      alert(
-        "Could not find a non-overlapping position for the rotated sprite.",
-      );
-      return;
-    }
+    if (!repacked) return;
 
-    const nextBox: ComponentBox = {
-      ...target,
-      x: placed.x,
-      y: placed.y,
-      w: placed.w,
-      h: placed.h,
-    };
-    const nextAtlas = await rotateImageRegion(img, target, nextBox, direction);
-    if (!nextAtlas) {
-      alert("Could not rotate sprite pixels on the atlas image.");
-      return;
-    }
-
-    setImg(nextAtlas);
-    setOriginalImg(nextAtlas);
-    setBoxes((prev) => prev.map((b, i) => (i === selected ? nextBox : b)));
-    setOriginalBoxes((prev) =>
-      prev.map((b, i) => (i === selected ? nextBox : b)),
-    );
-    setCustomBoxes((prev) =>
-      prev ? prev.map((b, i) => (i === selected ? nextBox : b)) : prev,
-    );
+    setImg(repacked.img);
+    setOriginalImg(repacked.img);
+    setBoxes(repacked.boxes);
+    setOriginalBoxes(repacked.boxes);
+    setCustomBoxes((prev) => (prev ? repacked.boxes : prev));
+    setAtlasWidth(repacked.img.width);
+    setAtlasHeight(repacked.img.height);
   };
 
   const handleClear = () => {
@@ -1100,87 +1076,6 @@ function parseCustomSprites(data: any, format: JsonFormat): ComponentBox[] {
   return [];
 }
 
-function getCenteredRotatedBox(
-  box: ComponentBox,
-  imgW: number,
-  imgH: number,
-): Pick<ComponentBox, "x" | "y" | "w" | "h"> | null {
-  const w = box.h;
-  const h = box.w;
-  if (w > imgW || h > imgH) return null;
-  const centerX = box.x + box.w / 2;
-  const centerY = box.y + box.h / 2;
-  const maxX = Math.max(0, imgW - w);
-  const maxY = Math.max(0, imgH - h);
-  return {
-    x: clampIntToRange(centerX - w / 2, 0, maxX),
-    y: clampIntToRange(centerY - h / 2, 0, maxY),
-    w,
-    h,
-  };
-}
-
-function findNonOverlappingPlacement(
-  target: Pick<ComponentBox, "x" | "y" | "w" | "h">,
-  boxes: ComponentBox[],
-  skipIndex: number,
-  imgW: number,
-  imgH: number,
-): Pick<ComponentBox, "x" | "y" | "w" | "h"> | null {
-  const maxX = Math.max(0, imgW - target.w);
-  const maxY = Math.max(0, imgH - target.h);
-  if (target.w > imgW || target.h > imgH) return null;
-
-  const base = {
-    x: clampIntToRange(target.x, 0, maxX),
-    y: clampIntToRange(target.y, 0, maxY),
-    w: target.w,
-    h: target.h,
-  };
-  const others = boxes.filter((_, i) => i !== skipIndex);
-  const collides = (candidate: Pick<ComponentBox, "x" | "y" | "w" | "h">) =>
-    others.some((b) => overlaps(b, candidate));
-
-  if (!collides(base)) return base;
-
-  const xSet = new Set<number>([base.x, 0, maxX]);
-  const ySet = new Set<number>([base.y, 0, maxY]);
-  others.forEach((b) => {
-    xSet.add(b.x - base.w);
-    xSet.add(b.x + b.w);
-    ySet.add(b.y - base.h);
-    ySet.add(b.y + b.h);
-  });
-
-  const xs = Array.from(xSet)
-    .map((x) => clampIntToRange(x, 0, maxX))
-    .filter((x, i, arr) => arr.indexOf(x) === i);
-  const ys = Array.from(ySet)
-    .map((y) => clampIntToRange(y, 0, maxY))
-    .filter((y, i, arr) => arr.indexOf(y) === i);
-
-  const points = xs.flatMap((x) =>
-    ys.map((y) => ({
-      x,
-      y,
-      dist: Math.abs(x - base.x) + Math.abs(y - base.y),
-    })),
-  );
-
-  points.sort((a, b) => a.dist - b.dist || a.y - b.y || a.x - b.x);
-  for (const point of points) {
-    const candidate = { ...base, x: point.x, y: point.y };
-    if (!collides(candidate)) return candidate;
-  }
-
-  return null;
-}
-
-function clampIntToRange(value: number, min: number, max: number): number {
-  if (Number.isNaN(value)) return min;
-  return Math.max(min, Math.min(max, Math.round(value)));
-}
-
 function detectFittedBoundsForBox(
   img: HTMLImageElement,
   target: ComponentBox,
@@ -1302,56 +1197,6 @@ function isBoxInsideImage(box: ComponentBox, img: HTMLImageElement): boolean {
     box.x + box.w <= img.width &&
     box.y + box.h <= img.height
   );
-}
-
-async function rotateImageRegion(
-  img: HTMLImageElement,
-  from: ComponentBox,
-  to: ComponentBox,
-  direction: "left" | "right",
-): Promise<HTMLImageElement | null> {
-  if (!isBoxInsideImage(from, img) || !isBoxInsideImage(to, img)) return null;
-
-  const source = document.createElement("canvas");
-  source.width = from.w;
-  source.height = from.h;
-  const sourceCtx = source.getContext("2d");
-  if (!sourceCtx) return null;
-  sourceCtx.imageSmoothingEnabled = false;
-  sourceCtx.drawImage(
-    img,
-    from.x,
-    from.y,
-    from.w,
-    from.h,
-    0,
-    0,
-    from.w,
-    from.h,
-  );
-
-  const canvas = document.createElement("canvas");
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, 0, 0);
-  ctx.clearRect(from.x, from.y, from.w, from.h);
-  ctx.clearRect(to.x, to.y, to.w, to.h);
-
-  ctx.save();
-  if (direction === "right") {
-    ctx.translate(to.x + to.w, to.y);
-    ctx.rotate(Math.PI / 2);
-  } else {
-    ctx.translate(to.x, to.y + to.h);
-    ctx.rotate(-Math.PI / 2);
-  }
-  ctx.drawImage(source, 0, 0, from.w, from.h);
-  ctx.restore();
-
-  return await imageFromCanvas(canvas);
 }
 
 async function transformImageRegion(
