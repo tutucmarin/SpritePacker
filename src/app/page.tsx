@@ -29,7 +29,10 @@ export default function Page() {
     atlasWidth,
     atlasHeight,
     fixedSize,
+    autoSize,
+    atlasScale,
     downloadMode,
+    atlasImageFormat,
     archive,
     bgMode,
     cclTol,
@@ -52,6 +55,7 @@ export default function Page() {
           selected={selected}
           onSelect={actions.onSelect}
           onFiles={actions.onFiles}
+          onLoadAtlas={actions.onLoadAtlas}
           itemRefs={itemRefs}
         />
 
@@ -63,8 +67,10 @@ export default function Page() {
           editMode={true}
           background={background}
           onSelect={actions.onSelect}
+          onSelectMany={actions.onSelectMany}
           onMoveBox={actions.onMoveBox}
-          onAddBox={(b) => actions.onAddBox(b)}
+          onCopy={actions.onCopySelected}
+          onPaste={actions.onPasteSelected}
           stageRef={stageRef}
           overlayRef={overlayRef}
           canvasRef={canvasRef}
@@ -81,6 +87,10 @@ export default function Page() {
           onAtlasHeight={actions.onAtlasHeight}
           fixedSize={fixedSize}
           onFixedSize={actions.onFixedSize}
+          autoSize={autoSize}
+          onAutoSize={actions.onAutoSize}
+          atlasScale={atlasScale}
+          onAtlasScale={actions.onAtlasScale}
           jsonFormat={jsonFormat}
           onJsonFormat={actions.onJsonFormat}
           onClearAll={actions.onClearAll}
@@ -96,13 +106,17 @@ export default function Page() {
           onDetect={actions.onDetect}
           onCustomJson={actions.onCustomJson}
           selectedBox={selectedBox}
-          selectedIndex={selected}
+          selectedIndex={selected.length === 1 ? selected[0] : null}
+          selectedCount={selected.length}
           onUpdate={actions.onUpdateSelected}
           onDelete={actions.onDeleteSelected}
           onReplace={actions.onReplaceSelected}
           onFit={actions.onFitSelected}
+          onRotate={actions.onRotateSelected}
           downloadMode={downloadMode}
           onDownloadMode={actions.onDownloadMode}
+          atlasImageFormat={atlasImageFormat}
+          onAtlasImageFormat={actions.onAtlasImageFormat}
           archive={archive}
           onArchive={actions.onArchive}
           onDownload={actions.onDownload}

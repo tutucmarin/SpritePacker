@@ -5,13 +5,15 @@ import { useCanvasInteractions } from "@/src/hooks/useCanvasInteractions";
 type Props = {
   img: HTMLImageElement | null;
   boxes: ComponentBox[];
-  selected: number | null;
+  selected: number[];
   displaySize: { w: number; h: number } | null;
   editMode: boolean;
   background: "transparent" | "clear" | "white" | "pink" | "black";
-  onSelect: (idx: number | null) => void;
+  onSelect: (idx: number | null, additive?: boolean) => void;
+  onSelectMany: (indices: number[], additive?: boolean) => void;
   onMoveBox: (updater: (prev: ComponentBox[]) => ComponentBox[]) => void;
-  onAddBox: (box: ComponentBox) => number | null;
+  onCopy: () => Promise<void> | void;
+  onPaste: (files: File[]) => Promise<void> | void;
   stageRef: React.RefObject<HTMLDivElement>;
   overlayRef: React.RefObject<HTMLCanvasElement>;
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -25,8 +27,10 @@ export function CanvasStage({
   editMode,
   background,
   onSelect,
+  onSelectMany,
   onMoveBox,
-  onAddBox,
+  onCopy,
+  onPaste,
   stageRef,
   overlayRef,
   canvasRef,
@@ -39,25 +43,26 @@ export function CanvasStage({
       overlayRef,
       editMode,
       onSelect,
+      onSelectMany,
       onMoveBox,
-      onAddBox,
     });
   const showReset = Math.abs(zoom - 1) > 0.001;
 
-  // draw image and overlay
+  // The atlas bitmap changes far less often than the selection overlay. Avoid
+  // reallocating and redrawing the full atlas for every pointer move.
   useEffect(() => {
-    if (!canvasRef.current || !overlayRef.current || !img) return;
     const canvas = canvasRef.current;
-    const overlay = overlayRef.current;
+    if (!canvas) return;
+    if (!img) {
+      canvas.width = 0;
+      canvas.height = 0;
+      return;
+    }
     const ctx = canvas.getContext("2d");
-    const octx = overlay.getContext("2d");
-    if (!ctx || !octx) return;
-    canvas.width = img.width;
-    canvas.height = img.height;
-    overlay.width = img.width;
-    overlay.height = img.height;
+    if (!ctx) return;
+    if (canvas.width !== img.width) canvas.width = img.width;
+    if (canvas.height !== img.height) canvas.height = img.height;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    octx.clearRect(0, 0, overlay.width, overlay.height);
 
     // draw checkerboard background
     const bgStyle = canvasBackgroundStyle(background);
@@ -70,8 +75,23 @@ export function CanvasStage({
     }
 
     ctx.drawImage(img, 0, 0);
+  }, [img, canvasRef, background]);
+
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+    if (!img) {
+      overlay.width = 0;
+      overlay.height = 0;
+      return;
+    }
+    const octx = overlay.getContext("2d");
+    if (!octx) return;
+    if (overlay.width !== img.width) overlay.width = img.width;
+    if (overlay.height !== img.height) overlay.height = img.height;
+    octx.clearRect(0, 0, overlay.width, overlay.height);
     boxes.forEach((b, i) => {
-      const isSel = selected === i;
+      const isSel = selected.includes(i);
       octx.strokeStyle = isSel
         ? "rgba(245,158,11,0.95)"
         : "rgba(52,211,153,0.9)";
@@ -93,7 +113,7 @@ export function CanvasStage({
       octx.fillRect(draftBox.x, draftBox.y, draftBox.w, draftBox.h);
       octx.setLineDash([]);
     }
-  }, [img, boxes, selected, draftBox, canvasRef, overlayRef, background]);
+  }, [img, boxes, selected, draftBox, overlayRef]);
 
   useEffect(() => {
     if (overlayRef.current) {
@@ -103,18 +123,8 @@ export function CanvasStage({
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!editMode || selected == null || !img) return;
-
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "SELECT" ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
+      if (isEditableTarget(e.target)) return;
+      if (!editMode || !selected.length || !img) return;
 
       let dx = 0;
       let dy = 0;
@@ -125,22 +135,51 @@ export function CanvasStage({
       else return;
 
       e.preventDefault();
+      const selectedSet = new Set(selected);
+      const selectedBoxes = boxes.filter((_, index) => selectedSet.has(index));
+      const minX = Math.min(...selectedBoxes.map((box) => box.x));
+      const minY = Math.min(...selectedBoxes.map((box) => box.y));
+      const maxRight = Math.max(...selectedBoxes.map((box) => box.x + box.w));
+      const maxBottom = Math.max(...selectedBoxes.map((box) => box.y + box.h));
+      const safeDx = clamp(dx, -minX, img.width - maxRight);
+      const safeDy = clamp(dy, -minY, img.height - maxBottom);
       onMoveBox((prev) =>
-        prev.map((b, i) =>
-          i === selected
-            ? {
-                ...b,
-                x: clamp(b.x + dx, 0, img.width - b.w),
-                y: clamp(b.y + dy, 0, img.height - b.h),
-              }
-            : b,
+        prev.map((box, index) =>
+          selectedSet.has(index)
+            ? { ...box, x: box.x + safeDx, y: box.y + safeDy }
+            : box,
         ),
       );
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editMode, img, selected, onMoveBox]);
+  }, [editMode, img, boxes, selected, onMoveBox]);
+
+  useEffect(() => {
+    const onWindowCopy = (event: ClipboardEvent) => {
+      if (isEditableTarget(event.target) || !selected.length) return;
+      event.preventDefault();
+      void onCopy();
+    };
+
+    window.addEventListener("copy", onWindowCopy);
+    return () => window.removeEventListener("copy", onWindowCopy);
+  }, [selected, onCopy]);
+
+  useEffect(() => {
+    const onWindowPaste = (event: ClipboardEvent) => {
+      if (isEditableTarget(event.target)) return;
+
+      const files = clipboardImageFiles(event.clipboardData);
+      if (!files.length) return;
+      event.preventDefault();
+      void onPaste(files);
+    };
+
+    window.addEventListener("paste", onWindowPaste);
+    return () => window.removeEventListener("paste", onWindowPaste);
+  }, [onPaste]);
 
   return (
     <div className="panel">
@@ -191,6 +230,33 @@ export function CanvasStage({
         )}
       </div>
     </div>
+  );
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  const element = target instanceof HTMLElement ? target : null;
+  return Boolean(
+    element &&
+      (element.tagName === "INPUT" ||
+        element.tagName === "TEXTAREA" ||
+        element.tagName === "SELECT" ||
+        element.isContentEditable),
+  );
+}
+
+function clipboardImageFiles(clipboard: DataTransfer | null): File[] {
+  if (!clipboard) return [];
+
+  const fromItems = Array.from(clipboard.items)
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .flatMap((item) => {
+      const file = item.getAsFile();
+      return file ? [file] : [];
+    });
+  if (fromItems.length) return fromItems;
+
+  return Array.from(clipboard.files).filter((file) =>
+    file.type.startsWith("image/"),
   );
 }
 

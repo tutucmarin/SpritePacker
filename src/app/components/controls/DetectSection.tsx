@@ -1,4 +1,5 @@
 import type { JsonFormat } from "@/src/app/components/controls/ProjectSection";
+import { CommittedNumberInput } from "@/src/app/components/controls/CommittedNumberInput";
 
 type Props = {
   bgMode: "auto" | "alpha" | "key" | "custom";
@@ -53,12 +54,11 @@ export function DetectSection({
       <div className="setting-row" style={{ marginTop: 6 }}>
         <span className="label">Tolerance</span>
         <div className="control">
-          <input
-            type="number"
+          <CommittedNumberInput
             value={cclTol}
             min={0}
             max={64}
-            onChange={(e) => onTol(parseInt(e.target.value || "16", 10))}
+            onCommit={onTol}
           />
         </div>
       </div>

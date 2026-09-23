@@ -1,5 +1,6 @@
 import { ComponentBox } from "@/src/lib/types";
 import { useEffect, useRef, useState } from "react";
+import { CommittedNumberInput } from "@/src/app/components/controls/CommittedNumberInput";
 
 type Props = {
   box: ComponentBox | null;
@@ -11,6 +12,7 @@ type Props = {
   onDelete: () => void;
   onReplace: (file: File) => void;
   onFit: () => void;
+  onRotate: (direction: "left" | "right") => Promise<void> | void;
 };
 
 export function SpriteInfo({
@@ -20,6 +22,7 @@ export function SpriteInfo({
   onDelete,
   onReplace,
   onFit,
+  onRotate,
 }: Props) {
   const [name, setName] = useState("");
   const [x, setX] = useState(0);
@@ -65,8 +68,8 @@ export function SpriteInfo({
           <div className="setting-row" style={{ marginTop: 8 }}>
             <span className="label">Position</span>
             <div className="control sprite-bounds">
-              <NumberInput label="x" value={x} onChange={setX} />
-              <NumberInput label="y" value={y} onChange={setY} />
+              <NumberInput label="x" value={x} onChange={setX} min={0} />
+              <NumberInput label="y" value={y} onChange={setY} min={0} />
             </div>
           </div>
           <div className="setting-row" style={{ marginTop: 8 }}>
@@ -95,7 +98,7 @@ export function SpriteInfo({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept=".png,.apng,.jpg,.jpeg,.jfif,.webp,.gif,.bmp,.avif,.svg,.ico,.tif,.tiff,.heic,.heif,image/*"
               style={{ display: "none" }}
               onChange={(e) => {
                 const f = e.target.files?.[0];
@@ -105,8 +108,8 @@ export function SpriteInfo({
             />
               <button
                 className="secondary btn-icon"
-                title="Size must match on width or height (±1px)."
-                aria-label="Upload replacement sprite (size must match on width or height, plus or minus one pixel)"
+                title="Replace with an image of any size."
+                aria-label="Upload replacement sprite"
                 onClick={() => fileInputRef.current?.click()}
               >
                 Upload
@@ -123,6 +126,27 @@ export function SpriteInfo({
                 onClick={onFit}
               >
                 Fit
+              </button>
+            </div>
+          </div>
+          <div className="setting-row" style={{ marginTop: 8 }}>
+            <span className="label">Rotate</span>
+            <div className="control sprite-actions">
+              <button
+                className="secondary btn-icon"
+                title="Rotate sprite left"
+                aria-label="Rotate sprite left"
+                onClick={() => onRotate("left")}
+              >
+                Left
+              </button>
+              <button
+                className="secondary btn-icon"
+                title="Rotate sprite right"
+                aria-label="Rotate sprite right"
+                onClick={() => onRotate("right")}
+              >
+                Right
               </button>
             </div>
           </div>
@@ -174,11 +198,10 @@ function NumberInput({
   return (
     <label className="sprite-metric">
       {label}
-      <input
-        type="number"
+      <CommittedNumberInput
         value={value}
         min={min}
-        onChange={(e) => onChange(parseInt(e.target.value || "0", 10))}
+        onCommit={onChange}
       />
     </label>
   );
