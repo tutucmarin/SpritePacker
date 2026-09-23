@@ -40,10 +40,31 @@ type DupReport = {
   groups: { hash: string; items: { idx: number; name: string }[] }[];
 };
 
+type ClipboardSprite = {
+  box: ComponentBox;
+  canvas: HTMLCanvasElement;
+};
+
+type FilePickerAcceptType = {
+  description?: string;
+  accept: Record<string, string[]>;
+};
+
+type FilePickerOptions = {
+  multiple?: boolean;
+  types?: FilePickerAcceptType[];
+};
+
+type FilePickerWindow = Window & {
+  showOpenFilePicker?: (
+    options?: FilePickerOptions,
+  ) => Promise<FileSystemFileHandle[]>;
+};
+
 type SpritePackerState = {
   img: HTMLImageElement | null;
   boxes: ComponentBox[];
-  selected: number | null;
+  selected: number[];
   projectName: string;
   packerMode: "default" | "optimal" | "maxrect";
   jsonFormat: JsonFormat;
@@ -67,11 +88,14 @@ type SpritePackerState = {
 
 type SpritePackerActions = {
   onFiles: (files?: File[]) => Promise<void>;
+  onLoadAtlas: (files?: File[]) => Promise<void>;
   onDetect: () => Promise<void>;
   onCustomJson: (file?: File) => Promise<void>;
-  onSelect: (idx: number | null) => void;
+  onSelect: (idx: number | null, additive?: boolean) => void;
+  onSelectMany: (indices: number[], additive?: boolean) => void;
   onMoveBox: (updater: (prev: ComponentBox[]) => ComponentBox[]) => void;
-  onAddBox: (box: ComponentBox) => number | null;
+  onCopySelected: () => Promise<void>;
+  onPasteSelected: (files: File[]) => Promise<void>;
   onDeleteSelected: () => Promise<void>;
   onClearAll: () => void;
   onUpdateSelected: (
@@ -122,7 +146,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
   const [boxes, setBoxes] = useState<ComponentBox[]>([]);
   const [originalImg, setOriginalImg] = useState<HTMLImageElement | null>(null);
   const [originalBoxes, setOriginalBoxes] = useState<ComponentBox[]>([]);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number[]>([]);
   const [archive, setArchive] = useState(true);
   const [bgMode, setBgMode] = useState<"auto" | "alpha" | "key" | "custom">(
     "auto",
@@ -148,6 +172,9 @@ export function useSpritePacker(): UseSpritePackerReturn {
   const [customBoxes, setCustomBoxes] = useState<ComponentBox[] | null>(null);
   const renderRevision = useRef(0);
   const commitRevision = useRef(0);
+  const clipboardRef = useRef<ClipboardSprite[]>([]);
+  const clipboardBlobRef = useRef<Blob | null>(null);
+  const pasteInProgressRef = useRef(false);
 
   const renderScaledAtlas = async (
     sourceImg: HTMLImageElement,
@@ -197,7 +224,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       fixed?: boolean;
       targetW?: number | null;
       targetH?: number | null;
-      rotate?: { index: number; direction: "left" | "right" };
+      rotate?: { indices: number[]; direction: "left" | "right" };
       scalePercent?: number;
       clearSelection?: boolean;
     } = {},
@@ -210,7 +237,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       setBoxes([]);
       setAtlasWidth(null);
       setAtlasHeight(null);
-      if (options.clearSelection !== false) setSelected(null);
+      if (options.clearSelection !== false) setSelected([]);
       return;
     }
 
@@ -232,7 +259,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
 
     setOriginalImg(repacked.img);
     setOriginalBoxes(repacked.boxes);
-    if (options.clearSelection !== false) setSelected(null);
+    if (options.clearSelection !== false) setSelected([]);
     await renderScaledAtlas(
       repacked.img,
       repacked.boxes,
@@ -245,8 +272,27 @@ export function useSpritePacker(): UseSpritePackerReturn {
     setBgMode("auto");
   }, []);
 
-  const onSelect = (idx: number | null) =>
-    setSelected((prev) => (prev === idx ? null : idx));
+  const onSelect = (idx: number | null, additive = false) => {
+    if (idx == null) {
+      setSelected([]);
+      return;
+    }
+    setSelected((previous) => {
+      if (!additive) return [idx];
+      return previous.includes(idx)
+        ? previous.filter((value) => value !== idx)
+        : [...previous, idx];
+    });
+  };
+
+  const onSelectMany = (indices: number[], additive = false) => {
+    const valid = [...new Set(indices)].filter(
+      (index) => index >= 0 && index < boxes.length,
+    );
+    setSelected((previous) =>
+      additive ? [...new Set([...previous, ...valid])] : valid,
+    );
+  };
 
   const onMoveBox = (updater: (prev: ComponentBox[]) => ComponentBox[]) => {
     setBoxes((prev) => {
@@ -281,61 +327,21 @@ export function useSpritePacker(): UseSpritePackerReturn {
     });
   };
 
-  const addBoxIfNonOverlap = (b: ComponentBox): number | null => {
-    if (boxes.some((p) => overlaps(p, b))) return null;
-    let name = b.name?.trim();
-    if (!name) {
-      let number = boxes.length + 1;
-      while (boxes.some((p, i) => spriteNameKey(spriteName(p, i)) === spriteNameKey(`sprite-${number}`))) {
-        number++;
-      }
-      name = `sprite-${number}`;
-    }
-    const duplicate = boxes.findIndex(
-      (p, i) => spriteNameKey(spriteName(p, i)) === spriteNameKey(name),
-    );
-    const nextBox = { ...b, name };
-    const unscaledBox = unscaleBox(nextBox, atlasScale / 100);
-    const nextOriginalBox = originalImg
-      ? fitBoxInsideImage(unscaledBox, originalImg)
-      : unscaledBox;
-    if (duplicate >= 0) {
-      if (!confirm(`A sprite named "${name}" already exists. Replace it?`))
-        return null;
-      setBoxes((prev) => prev.map((p, i) => i === duplicate ? nextBox : p));
-      const nextOriginalBoxes = originalBoxes.map((p, i) =>
-        i === duplicate ? nextOriginalBox : p,
-      );
-      setOriginalBoxes(nextOriginalBoxes);
-      if (!fixedSize && originalImg) {
-        void commitCanonicalAtlas(originalImg, nextOriginalBoxes, {
-          fixed: false,
-          clearSelection: false,
-        });
-      }
-      return duplicate;
-    }
-    const index = boxes.length;
-    setBoxes((prev) => [...prev, nextBox]);
-    const nextOriginalBoxes = [...originalBoxes, nextOriginalBox];
-    setOriginalBoxes(nextOriginalBoxes);
-    if (!fixedSize && originalImg) {
-      void commitCanonicalAtlas(originalImg, nextOriginalBoxes, {
-        fixed: false,
-        clearSelection: false,
-      });
-    }
-    return index;
-  };
-
-  const handleFiles = async (files?: File[]) => {
+  const importFiles = async (files?: File[]) => {
     if (!files || !files.length) return;
 
     // A custom atlas description may be selected before its image. In that
     // case the single image is the atlas itself, not a sprite to be packed.
     if (!originalImg && customBoxes?.length && files.length === 1) {
       const file = files[0];
-      const atlas = await loadImageFromFile(file);
+      let atlas: HTMLImageElement;
+      try {
+        atlas = await loadImageFromFile(file);
+      } catch (error) {
+        console.error(error);
+        alert(imageLoadErrorMessage(file, error));
+        return;
+      }
       if (customBoxes.some((box) => !isBoxInsideImage(box, atlas))) {
         alert("Custom sprite bounds must stay inside the atlas image.");
         return;
@@ -348,7 +354,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       if ((!projectName || projectName === "project") && name) {
         setProjectName(name);
       }
-      setSelected(null);
+      setSelected([]);
       return;
     }
 
@@ -361,6 +367,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
     let firstName = "";
     let firstFormat: AtlasImageFormat | null = null;
     let accepted = 0;
+    const rejected: { file: File; error: unknown }[] = [];
     if (originalImg && originalBoxes.length) {
       originalBoxes.forEach((b, idx) => {
         const c = document.createElement("canvas");
@@ -393,9 +400,16 @@ export function useSpritePacker(): UseSpritePackerReturn {
       );
       if (duplicate >= 0 && !confirm(`A sprite named "${name}" already exists. Replace it?`))
         continue;
+      let nextImg: HTMLImageElement;
+      try {
+        nextImg = await loadImageFromFile(f);
+      } catch (error) {
+        console.error(error);
+        rejected.push({ file: f, error });
+        continue;
+      }
       if (!firstName) firstName = name;
       if (!firstFormat) firstFormat = atlasFormatFromFile(f);
-      const nextImg = await loadImageFromFile(f);
       const c = document.createElement("canvas");
       c.width = nextImg.width;
       c.height = nextImg.height;
@@ -420,15 +434,27 @@ export function useSpritePacker(): UseSpritePackerReturn {
         item.canvas.width = 0;
         item.canvas.height = 0;
       });
+      if (rejected.length) alert(imageLoadErrorsMessage(rejected));
       return;
     }
-    const packed = await packCanvases(
-      canvases,
-      spacing,
-      packerMode,
-      fixedSize ? toBaseDimension(atlasWidth, atlasScale) : null,
-      fixedSize ? toBaseDimension(atlasHeight, atlasScale) : null,
-    );
+    let packed: Awaited<ReturnType<typeof packCanvases>>;
+    try {
+      packed = await packCanvases(
+        canvases,
+        spacing,
+        packerMode,
+        fixedSize ? toBaseDimension(atlasWidth, atlasScale) : null,
+        fixedSize ? toBaseDimension(atlasHeight, atlasScale) : null,
+      );
+    } catch (error) {
+      console.error(error);
+      canvases.forEach((item) => {
+        item.canvas.width = 0;
+        item.canvas.height = 0;
+      });
+      alert("The images were loaded, but the atlas could not be created.");
+      return;
+    }
     if (packed) {
       if (!img && firstFormat) setAtlasImageFormat(firstFormat);
       setOriginalImg(packed.img);
@@ -438,7 +464,91 @@ export function useSpritePacker(): UseSpritePackerReturn {
         setProjectName(firstName);
       setBgMode("auto");
       setCustomBoxes(null);
-      setSelected(null);
+      setSelected([]);
+    }
+    if (rejected.length) alert(imageLoadErrorsMessage(rejected));
+  };
+
+  const handleFiles = async (files?: File[]) => {
+    try {
+      await importFiles(files);
+    } catch (error) {
+      console.error(error);
+      alert("The selected images could not be added. Please check the files and try again.");
+    }
+  };
+
+  const handleLoadAtlas = async (fallbackFiles?: File[]) => {
+    try {
+      let files = fallbackFiles;
+
+      if (!files) {
+        const picker = (window as FilePickerWindow).showOpenFilePicker;
+        if (!picker) return;
+        const handles = await picker.call(window, {
+          multiple: true,
+          types: [
+            {
+              description: "Atlas image and JSON",
+              accept: {
+                "image/png": [".png"],
+                "image/webp": [".webp"],
+                "image/jpeg": [".jpg", ".jpeg"],
+                "image/gif": [".gif"],
+                "image/bmp": [".bmp"],
+                "image/avif": [".avif"],
+                "image/svg+xml": [".svg"],
+                "application/json": [".json"],
+              },
+            },
+          ],
+        });
+        files = await Promise.all(handles.map((handle) => handle.getFile()));
+      }
+
+      const imageFiles = (files ?? []).filter(isAtlasImageFile);
+      const dataFiles = (files ?? []).filter(isJsonAtlasFile);
+      if (imageFiles.length !== 1 || dataFiles.length !== 1 || files?.length !== 2) {
+        alert("Choose exactly one atlas image and one JSON atlas file.");
+        return;
+      }
+
+      const imageFile = imageFiles[0];
+      const dataFile = dataFiles[0];
+      const [atlas, text] = await Promise.all([
+        loadImageFromFile(imageFile),
+        dataFile.text(),
+      ]);
+      const parsed = parseAtlasJson(JSON.parse(text));
+      if (!parsed.boxes.length) {
+        alert("No sprites found in the selected JSON atlas file.");
+        return;
+      }
+      if (parsed.boxes.some((box) => !isBoxInsideImage(box, atlas))) {
+        alert("JSON sprite bounds must stay inside the atlas image.");
+        return;
+      }
+
+      // Loading is deliberately metadata-only. Keep the source pixels, canvas
+      // size, and every imported frame coordinate untouched until an explicit
+      // edit or packing action occurs.
+      atlasScaleRef.current = 100;
+      setAtlasScale(100);
+      setAtlasImageFormat(atlasFormatFromFile(imageFile));
+      setJsonFormat(parsed.format);
+      setOriginalImg(atlas);
+      setOriginalBoxes(parsed.boxes);
+      setCustomBoxes(parsed.boxes);
+      setSelected([]);
+      setBgMode("auto");
+      await renderScaledAtlas(atlas, parsed.boxes, 100);
+
+      const name = imageFile.name.replace(/\.[^.]+$/, "").trim();
+      if (name) setProjectName(name);
+    } catch (error) {
+      if (isAbortError(error)) return;
+      console.error(error);
+      alert("Failed to load the atlas. Please check the image and JSON files.");
     }
   };
 
@@ -549,7 +659,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       }
       setOriginalBoxes(next);
       setCustomBoxes(next);
-      setSelected(null);
+      setSelected([]);
       if (originalImg) {
         // Import is metadata-only: keep the uploaded atlas pixels and canvas
         // dimensions untouched until the user explicitly requests a repack.
@@ -612,77 +722,274 @@ export function useSpritePacker(): UseSpritePackerReturn {
     });
   };
 
-  const handleDelete = async () => {
-    if (selected == null) return;
-    const target = boxes[selected];
-    const originalTarget = originalBoxes[selected] ?? target;
-    const nextOriginalBoxes = originalBoxes.filter((_, i) => i !== selected);
-    const clearedOriginalImg = originalImg
-      ? await clearRegion(originalImg, originalTarget)
-      : null;
+  const handleCopySelected = async () => {
+    if (!originalImg || !selected.length) return;
+    clipboardRef.current.forEach(({ canvas }) => {
+      canvas.width = 0;
+      canvas.height = 0;
+    });
+    clipboardRef.current = [...selected]
+      .sort((a, b) => a - b)
+      .flatMap((index) => {
+        const box = originalBoxes[index];
+        if (!box || !isBoxInsideImage(box, originalImg)) return [];
+        const canvas = document.createElement("canvas");
+        canvas.width = box.w;
+        canvas.height = box.h;
+        canvas
+          .getContext("2d")
+          ?.drawImage(
+            originalImg,
+            box.x,
+            box.y,
+            box.w,
+            box.h,
+            0,
+            0,
+            box.w,
+            box.h,
+          );
+        return [{ box: cloneBox(box), canvas }];
+      });
 
-    setCustomBoxes((prev) =>
-      prev ? prev.filter((_, i) => i !== selected) : prev,
+    if (!clipboardRef.current.length) return;
+
+    const copied = clipboardRef.current;
+    const minX = Math.min(...copied.map(({ box }) => box.x));
+    const minY = Math.min(...copied.map(({ box }) => box.y));
+    const maxRight = Math.max(...copied.map(({ box }) => box.x + box.w));
+    const maxBottom = Math.max(...copied.map(({ box }) => box.y + box.h));
+    const clipboardCanvas = document.createElement("canvas");
+    clipboardCanvas.width = maxRight - minX;
+    clipboardCanvas.height = maxBottom - minY;
+    const context = clipboardCanvas.getContext("2d");
+    if (!context) return;
+    copied.forEach(({ box, canvas }) => {
+      context.drawImage(canvas, box.x - minX, box.y - minY, box.w, box.h);
+    });
+
+    clipboardBlobRef.current = null;
+    try {
+      const blobPromise = toBlob(clipboardCanvas, "image/png");
+      if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+        await blobPromise;
+        console.warn("This browser does not support copying images to the system clipboard.");
+        return;
+      }
+
+      // Passing the pending Blob keeps the clipboard write tied to the keyboard
+      // gesture in browsers that require transient user activation (notably Safari).
+      const writePromise = navigator.clipboard.write([
+        new ClipboardItem({ "image/png": blobPromise }),
+      ]);
+      const [blob] = await Promise.all([blobPromise, writePromise]);
+      clipboardBlobRef.current = blob;
+    } catch (error) {
+      clipboardBlobRef.current = null;
+      console.error("Could not copy the selected sprite to the system clipboard.", error);
+    } finally {
+      clipboardCanvas.width = 0;
+      clipboardCanvas.height = 0;
+    }
+  };
+
+  const handlePasteSelected = async (files: File[]) => {
+    if (!files.length || pasteInProgressRef.current) return;
+    pasteInProgressRef.current = true;
+    try {
+      const isInternalCopy =
+        files.length === 1 &&
+        clipboardBlobRef.current != null &&
+        (await blobsEqual(files[0], clipboardBlobRef.current));
+
+      if (!isInternalCopy) {
+        await importFiles(files);
+        return;
+      }
+
+      if (!originalImg || !clipboardRef.current.length) {
+        await importFiles(files);
+        return;
+      }
+
+      const clipboard = clipboardRef.current;
+      const offset = findPasteOffset(
+        clipboard.map(({ box }) => box),
+        originalBoxes,
+      );
+      const usedNames = new Set(
+        originalBoxes.map((box, index) => spriteNameKey(spriteName(box, index))),
+      );
+      let nextId = originalBoxes.reduce(
+        (max, box) => Math.max(max, typeof box.id === "number" ? box.id : 0),
+        0,
+      ) + 1;
+      const pastedBoxes = clipboard.map(({ box }, index) => {
+        const baseName = spriteName(box, index);
+        const name = uniqueCopyName(baseName, usedNames);
+        usedNames.add(spriteNameKey(name));
+        return {
+          ...cloneBox(box),
+          id: nextId++,
+          name,
+          x: box.x + offset.x,
+          y: box.y + offset.y,
+        };
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(
+        originalImg.width,
+        ...pastedBoxes.map((box) => box.x + box.w),
+      );
+      canvas.height = Math.max(
+        originalImg.height,
+        ...pastedBoxes.map((box) => box.y + box.h),
+      );
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.drawImage(originalImg, 0, 0);
+      clipboard.forEach((item, index) => {
+        const box = pastedBoxes[index];
+        context.drawImage(item.canvas, box.x, box.y, box.w, box.h);
+      });
+      const nextImg = await loadImageFromCanvas(canvas);
+      canvas.width = 0;
+      canvas.height = 0;
+      const firstPastedIndex = originalBoxes.length;
+      const nextBoxes = [...originalBoxes, ...pastedBoxes];
+      setOriginalImg(nextImg);
+      setOriginalBoxes(nextBoxes);
+      setCustomBoxes((previous) => (previous ? nextBoxes : previous));
+      setSelected(pastedBoxes.map((_, index) => firstPastedIndex + index));
+      await renderScaledAtlas(nextImg, nextBoxes);
+    } finally {
+      pasteInProgressRef.current = false;
+    }
+  };
+
+  const singleSelected = selected.length === 1 ? selected[0] : null;
+
+  const handleDelete = async () => {
+    if (!selected.length || !originalImg) return;
+    const selectedSet = new Set(selected);
+    const removed = originalBoxes.filter((_, index) => selectedSet.has(index));
+    const nextOriginalBoxes = originalBoxes.filter(
+      (_, index) => !selectedSet.has(index),
     );
-    setSelected(null);
-    if (clearedOriginalImg) {
-      await commitCanonicalAtlas(clearedOriginalImg, nextOriginalBoxes, {
-        fixed: fixedSize,
-        targetW: originalImg?.width,
-        targetH: originalImg?.height,
+    const clearedOriginalImg = await clearRegions(originalImg, removed);
+
+    setCustomBoxes((previous) =>
+      previous
+        ? previous.filter((_, index) => !selectedSet.has(index))
+        : previous,
+    );
+    setSelected([]);
+    if (!nextOriginalBoxes.length) {
+      setOriginalImg(clearedOriginalImg);
+      setOriginalBoxes([]);
+      setImg(null);
+      setBoxes([]);
+      setAtlasWidth(null);
+      setAtlasHeight(null);
+      return;
+    }
+    await commitCanonicalAtlas(clearedOriginalImg, nextOriginalBoxes, {
+      fixed: fixedSize,
+      targetW: originalImg.width,
+      targetH: originalImg.height,
+    });
+  };
+
+  const handleReplaceSelected = async (file: File) => {
+    if (singleSelected == null || !originalBoxes.length || !originalImg) return;
+    let replacement: HTMLImageElement;
+    try {
+      replacement = await loadImageFromFile(file);
+    } catch (error) {
+      console.error(error);
+      alert(imageLoadErrorMessage(file, error));
+      return;
+    }
+
+    let spriteCanvases: {
+      canvas: HTMLCanvasElement;
+      w: number;
+      h: number;
+      name?: string;
+    }[] = [];
+
+    try {
+      originalBoxes.forEach((box, index) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = index === singleSelected ? replacement.width : box.w;
+        canvas.height = index === singleSelected ? replacement.height : box.h;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Could not create an image canvas.");
+        if (index === singleSelected) {
+          context.drawImage(replacement, 0, 0);
+        } else {
+          context.drawImage(
+            originalImg,
+            box.x,
+            box.y,
+            box.w,
+            box.h,
+            0,
+            0,
+            box.w,
+            box.h,
+          );
+        }
+        spriteCanvases.push({
+          canvas,
+          w: canvas.width,
+          h: canvas.height,
+          name: spriteName(box, index),
+        });
+      });
+
+      const packed = await packCanvases(
+        spriteCanvases,
+        spacing,
+        packerMode,
+        fixedSize ? originalImg.width : null,
+        fixedSize ? originalImg.height : null,
+      );
+      if (!packed) {
+        alert("The replacement image was loaded, but the atlas could not be updated.");
+        return;
+      }
+
+      const updatedBoxes = packed.boxes.map((box, index) => {
+        const previous = originalBoxes[index];
+        if (index !== singleSelected) return { ...previous, ...box };
+        return {
+          ...previous,
+          ...box,
+          rotated: false,
+          trimmed: false,
+          spriteSourceSize: { x: 0, y: 0, w: box.w, h: box.h },
+          sourceSize: { w: box.w, h: box.h },
+        };
+      });
+      setOriginalImg(packed.img);
+      setOriginalBoxes(updatedBoxes);
+      setCustomBoxes((previous) => (previous ? updatedBoxes : previous));
+      await renderScaledAtlas(packed.img, updatedBoxes);
+    } catch (error) {
+      console.error(error);
+      alert("The replacement image was loaded, but the atlas could not be updated.");
+    } finally {
+      spriteCanvases.forEach(({ canvas }) => {
+        canvas.width = 0;
+        canvas.height = 0;
       });
     }
   };
 
-  const handleReplaceSelected = async (file: File) => {
-    if (selected == null || !originalBoxes.length || !originalImg) return;
-    const target = originalBoxes[selected];
-    const nextImg = await loadImageFromFile(file);
-    const closeWidth = Math.abs(nextImg.width - target.w) <= 1;
-    const closeHeight = Math.abs(nextImg.height - target.h) <= 1;
-    if (!closeWidth && !closeHeight) {
-      alert(
-        `Replacement must match current sprite width or height (±1px). Current ${target.w}x${target.h}, new ${nextImg.width}x${nextImg.height}.`,
-      );
-      return;
-    }
-    const redrawWithReplacement = async (
-      base: HTMLImageElement,
-    ): Promise<HTMLImageElement | null> => {
-      const c = document.createElement("canvas");
-      c.width = Math.max(base.width, target.x + nextImg.width);
-      c.height = Math.max(base.height, target.y + nextImg.height);
-      const ctx = c.getContext("2d");
-      if (!ctx) return null;
-      ctx.drawImage(base, 0, 0);
-      ctx.clearRect(target.x, target.y, target.w, target.h);
-      ctx.drawImage(nextImg, target.x, target.y, nextImg.width, nextImg.height);
-      return await imageFromCanvas(c);
-    };
-
-    const nextOriginal = await redrawWithReplacement(originalImg);
-    if (!nextOriginal) return;
-    const updated = originalBoxes.map((b, i) =>
-      i === selected ? { ...b, w: nextImg.width, h: nextImg.height } : b,
-    );
-    setCustomBoxes((prev) =>
-      prev
-        ? prev.map((b, i) =>
-            i === selected ? { ...b, w: nextImg.width, h: nextImg.height } : b,
-          )
-        : prev,
-    );
-    await commitCanonicalAtlas(nextOriginal, updated, {
-      fixed: fixedSize,
-      targetW: originalImg.width,
-      targetH: originalImg.height,
-      clearSelection: false,
-    });
-  };
-
   const handleFitSelected = async () => {
-    if (selected == null || !originalBoxes.length || !originalImg) return;
-    const target = originalBoxes[selected];
+    if (singleSelected == null || !originalBoxes.length || !originalImg) return;
+    const target = originalBoxes[singleSelected];
     const fitted = detectFittedBoundsForBox(
       originalImg,
       target,
@@ -700,14 +1007,14 @@ export function useSpritePacker(): UseSpritePackerReturn {
       return;
     }
     const nextBoxes = originalBoxes.map((b, i) =>
-      i === selected ? nextBox : b,
+      i === singleSelected ? nextBox : b,
     );
     if (boxesOverlap(nextBoxes)) {
       alert("Fitted sprite bounds overlap another sprite.");
       return;
     }
     setCustomBoxes((prev) =>
-      prev ? prev.map((b, i) => (i === selected ? nextBox : b)) : prev,
+      prev ? prev.map((b, i) => (i === singleSelected ? nextBox : b)) : prev,
     );
     await commitCanonicalAtlas(originalImg, nextBoxes, {
       fixed: fixedSize,
@@ -718,12 +1025,12 @@ export function useSpritePacker(): UseSpritePackerReturn {
   };
 
   const handleRotateSelected = async (direction: "left" | "right") => {
-    if (selected == null || !originalBoxes.length || !originalImg) return;
+    if (!selected.length || !originalBoxes.length || !originalImg) return;
     await commitCanonicalAtlas(originalImg, originalBoxes, {
       fixed: fixedSize,
       targetW: originalImg.width,
       targetH: originalImg.height,
-      rotate: { index: selected, direction },
+      rotate: { indices: selected, direction },
       clearSelection: false,
     });
   };
@@ -735,8 +1042,9 @@ export function useSpritePacker(): UseSpritePackerReturn {
     setOriginalImg(null);
     setAtlasWidth(null);
     setAtlasHeight(null);
-    setSelected(null);
+    setSelected([]);
     setAtlasImageFormat("png");
+    setCustomBoxes(null);
   };
 
   const downloadSpritesZip = async () => {
@@ -782,8 +1090,8 @@ export function useSpritePacker(): UseSpritePackerReturn {
 
   const buildAtlasArtifacts = async () => {
     if (!img || !boxes.length) return null;
-    const baseName = safeProjectName(projectName);
     const { mime, extension } = atlasFormatInfo(atlasImageFormat);
+    const baseName = safeProjectName(projectName);
     const imageName = `${baseName}.${extension}`;
     const imgCanvas = document.createElement("canvas");
     imgCanvas.width = img.width;
@@ -935,7 +1243,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
     }
   };
 
-  const selectedBox = selected != null ? boxes[selected] : null;
+  const selectedBox = singleSelected != null ? boxes[singleSelected] : null;
 
   const state: SpritePackerState = {
     img,
@@ -964,15 +1272,18 @@ export function useSpritePacker(): UseSpritePackerReturn {
 
   const actions: SpritePackerActions = {
     onFiles: handleFiles,
+    onLoadAtlas: handleLoadAtlas,
     onDetect: handleDetect,
     onCustomJson: handleCustomJson,
     onSelect,
+    onSelectMany,
     onMoveBox,
-    onAddBox: addBoxIfNonOverlap,
+    onCopySelected: handleCopySelected,
+    onPasteSelected: handlePasteSelected,
     onDeleteSelected: handleDelete,
     onClearAll: handleClear,
     onUpdateSelected: async (next, applyToImage = false) => {
-      if (selected == null || !selectedBox) return;
+      if (singleSelected == null || !selectedBox) return;
       const nextDisplayBox: ComponentBox = {
         ...selectedBox,
         ...next,
@@ -981,7 +1292,7 @@ export function useSpritePacker(): UseSpritePackerReturn {
       const duplicateIndex = nextDisplayBox.name
         ? boxes.findIndex(
             (box, index) =>
-              index !== selected &&
+              index !== singleSelected &&
               spriteNameKey(spriteName(box, index)) ===
                 spriteNameKey(nextDisplayBox.name || ""),
           )
@@ -995,14 +1306,14 @@ export function useSpritePacker(): UseSpritePackerReturn {
         return;
       }
       const overlapCandidates = boxes
-        .map((box, index) => (index === selected ? nextDisplayBox : box))
+        .map((box, index) => (index === singleSelected ? nextDisplayBox : box))
         .filter((_, index) => index !== duplicateIndex);
       if (boxesOverlap(overlapCandidates)) {
         alert("Updated sprite bounds overlap another sprite.");
         return;
       }
 
-      const originalSelected = originalBoxes[selected];
+      const originalSelected = originalBoxes[singleSelected];
       if (!originalSelected || !originalImg) return;
       const displayGeometryChanged =
         selectedBox.x !== nextDisplayBox.x ||
@@ -1048,12 +1359,12 @@ export function useSpritePacker(): UseSpritePackerReturn {
       }
       if (!nextOriginal) return;
       const nextOriginalBoxes = originalBoxes
-        .map((box, index) => (index === selected ? nextBox : box))
+        .map((box, index) => (index === singleSelected ? nextBox : box))
         .filter((_, index) => index !== duplicateIndex);
       setCustomBoxes((prev) =>
         prev
           ? prev
-              .map((box, index) => (index === selected ? nextBox : box))
+              .map((box, index) => (index === singleSelected ? nextBox : box))
               .filter((_, index) => index !== duplicateIndex)
           : prev,
       );
@@ -1063,8 +1374,8 @@ export function useSpritePacker(): UseSpritePackerReturn {
         targetH: originalImg.height,
         clearSelection: false,
       });
-      if (duplicateIndex >= 0 && duplicateIndex < selected) {
-        setSelected(selected - 1);
+      if (duplicateIndex >= 0 && duplicateIndex < singleSelected) {
+        setSelected([singleSelected - 1]);
       }
     },
     onReplaceSelected: handleReplaceSelected,
@@ -1362,6 +1673,75 @@ function parseCustomSprites(data: any, format: JsonFormat): ComponentBox[] {
   return [];
 }
 
+function parseAtlasJson(data: any): {
+  boxes: ComponentBox[];
+  format: JsonFormat;
+} {
+  if (!data || typeof data !== "object") {
+    return { boxes: [], format: "json-array" };
+  }
+
+  if (Array.isArray(data) || Array.isArray(data.frames)) {
+    return {
+      boxes: parseCustomSprites(data, "json-array"),
+      format: "json-array",
+    };
+  }
+
+  const frameCollection = data.frames ?? data;
+  if (
+    frameCollection &&
+    typeof frameCollection === "object" &&
+    !Array.isArray(frameCollection)
+  ) {
+    return {
+      boxes: parseCustomSprites(data, "json-hash"),
+      format: "json-hash",
+    };
+  }
+
+  return { boxes: [], format: "json-array" };
+}
+
+function isAtlasImageFile(file: File): boolean {
+  return (
+    file.type.toLowerCase().startsWith("image/") ||
+    /\.(png|apng|webp|jpe?g|jfif|gif|bmp|dib|avif|svg|ico|tiff?|heic|heif)$/i.test(file.name)
+  );
+}
+
+function isJsonAtlasFile(file: File): boolean {
+  return (
+    file.type.toLowerCase() === "application/json" ||
+    /\.json$/i.test(file.name)
+  );
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function imageLoadErrorMessage(file: File, error: unknown): string {
+  if (error instanceof Error && error.message.startsWith("Could not read")) {
+    return error.message;
+  }
+  return `Could not read "${file.name}". The file may be invalid or use an image format this browser does not support.`;
+}
+
+function imageLoadErrorsMessage(
+  failures: { file: File; error: unknown }[],
+): string {
+  if (failures.length === 1) {
+    return imageLoadErrorMessage(failures[0].file, failures[0].error);
+  }
+  const visibleNames = failures
+    .slice(0, 5)
+    .map(({ file }) => `“${file.name}”`)
+    .join(", ");
+  const remainder = failures.length > 5 ? ` and ${failures.length - 5} more` : "";
+  return `${failures.length} images could not be read: ${visibleNames}${remainder}. They may be invalid or use formats this browser does not support.`;
+}
+
 function parseImportedFrameMetadata(entry: any): Pick<
   ComponentBox,
   "rotated" | "trimmed" | "spriteSourceSize" | "sourceSize"
@@ -1476,16 +1856,16 @@ function intersectionArea(a: ComponentBox, b: ComponentBox): number {
   return w * h;
 }
 
-async function clearRegion(
+async function clearRegions(
   img: HTMLImageElement,
-  box: ComponentBox,
+  boxes: ComponentBox[],
 ): Promise<HTMLImageElement> {
   const canvas = document.createElement("canvas");
   canvas.width = img.width;
   canvas.height = img.height;
   const ctx = canvas.getContext("2d")!;
   ctx.drawImage(img, 0, 0);
-  ctx.clearRect(box.x, box.y, box.w, box.h);
+  boxes.forEach((box) => ctx.clearRect(box.x, box.y, box.w, box.h));
   return loadImageFromCanvas(canvas);
 }
 
@@ -1714,8 +2094,63 @@ function spriteName(box: ComponentBox, index: number): string {
   return box.name?.trim() || `sprite-${index + 1}`;
 }
 
+function cloneBox(box: ComponentBox): ComponentBox {
+  return {
+    ...box,
+    spriteSourceSize: box.spriteSourceSize
+      ? { ...box.spriteSourceSize }
+      : undefined,
+    sourceSize: box.sourceSize ? { ...box.sourceSize } : undefined,
+  };
+}
+
+function findPasteOffset(
+  copied: ComponentBox[],
+  existing: ComponentBox[],
+): { x: number; y: number } {
+  const step = 10;
+  for (let attempt = 1; attempt <= 10_000; attempt++) {
+    const offset = { x: step * attempt, y: step * attempt };
+    const candidates = copied.map((box) => ({
+      ...box,
+      x: box.x + offset.x,
+      y: box.y + offset.y,
+    }));
+    if (!candidates.some((box) => existing.some((item) => overlaps(box, item)))) {
+      return offset;
+    }
+  }
+
+  const minCopiedX = Math.min(...copied.map((box) => box.x));
+  const maxExistingRight = Math.max(0, ...existing.map((box) => box.x + box.w));
+  return { x: maxExistingRight - minCopiedX + step, y: step };
+}
+
+function uniqueCopyName(baseName: string, usedNames: Set<string>): string {
+  let candidate = `${baseName} copy`;
+  let number = 2;
+  while (usedNames.has(spriteNameKey(candidate))) {
+    candidate = `${baseName} copy ${number++}`;
+  }
+  return candidate;
+}
+
 function spriteNameKey(name: string): string {
   return name.trim().toLocaleLowerCase();
+}
+
+async function blobsEqual(left: Blob, right: Blob): Promise<boolean> {
+  if (left.size !== right.size || left.type !== right.type) return false;
+  const [leftBytes, rightBytes] = await Promise.all([
+    left.arrayBuffer(),
+    right.arrayBuffer(),
+  ]);
+  const a = new Uint8Array(leftBytes);
+  const b = new Uint8Array(rightBytes);
+  for (let index = 0; index < a.length; index++) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
 }
 
 function hashCanvas(c: HTMLCanvasElement) {

@@ -47,6 +47,7 @@ type Props = {
   // sprite info
   selectedBox: ComponentBox | null;
   selectedIndex: number | null;
+  selectedCount: number;
   onUpdate: (next: ComponentBox, applyToImage?: boolean) => Promise<void> | void;
   onDelete: () => void;
   onReplace: (file: File) => void;
@@ -94,6 +95,7 @@ export function ControlsPanel(props: Props) {
     onCustomJson,
     selectedBox,
     selectedIndex,
+    selectedCount,
     onUpdate,
     onDelete,
     onReplace,
@@ -157,6 +159,13 @@ export function ControlsPanel(props: Props) {
           onRotate={onRotate}
         />
       )}
+      {selectedCount > 1 && (
+        <MultiSpriteActions
+          count={selectedCount}
+          onDelete={onDelete}
+          onRotate={onRotate}
+        />
+      )}
 
       <DownloadSection
         mode={downloadMode}
@@ -170,6 +179,52 @@ export function ControlsPanel(props: Props) {
 
       <div className="help">
         Tip: choose a sprite sheet, auto-detect, then tweak boxes and download.
+      </div>
+    </div>
+  );
+}
+
+function MultiSpriteActions({
+  count,
+  onDelete,
+  onRotate,
+}: {
+  count: number;
+  onDelete: () => void;
+  onRotate: (direction: "left" | "right") => Promise<void> | void;
+}) {
+  return (
+    <div className="section-compact">
+      <div className="sprite-info-title">
+        <h3 style={{ margin: 0 }}>Sprite Actions</h3>
+        <span className="help">{count} selected</span>
+      </div>
+      <div className="setting-row" style={{ marginTop: 8 }}>
+        <span className="label">Rotate</span>
+        <div className="control sprite-actions">
+          <button
+            className="secondary btn-icon"
+            aria-label={`Rotate ${count} selected sprites left`}
+            onClick={() => onRotate("left")}
+          >
+            Left
+          </button>
+          <button
+            className="secondary btn-icon"
+            aria-label={`Rotate ${count} selected sprites right`}
+            onClick={() => onRotate("right")}
+          >
+            Right
+          </button>
+        </div>
+      </div>
+      <div className="setting-row" style={{ marginTop: 10 }}>
+        <span className="label">Actions</span>
+        <div className="control sprite-actions">
+          <button className="danger btn-icon" onClick={onDelete}>
+            Delete {count}
+          </button>
+        </div>
       </div>
     </div>
   );

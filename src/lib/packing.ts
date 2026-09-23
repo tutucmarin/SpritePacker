@@ -7,7 +7,7 @@ type PackerMode = "default" | "optimal" | "maxrect";
 type RepackOptions = {
   compact?: boolean;
   rotate?: {
-    index: number;
+    indices: number[];
     direction: "left" | "right";
   };
 };
@@ -44,6 +44,7 @@ export async function repackSprites(
     return { img: await loadImageFromCanvas(canvas), boxes: originalBoxes };
   }
 
+  const rotateIndices = new Set(options.rotate?.indices ?? []);
   const crops = originalBoxes.map((b, idx) => {
     const source = document.createElement("canvas");
     source.width = b.w;
@@ -52,7 +53,7 @@ export async function repackSprites(
     sourceCtx.imageSmoothingEnabled = false;
     sourceCtx.drawImage(originalImg, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
 
-    if (options.rotate?.index !== idx) {
+    if (!rotateIndices.has(idx)) {
       return { ...b, idx, canvas: source };
     }
 
@@ -73,7 +74,14 @@ export async function repackSprites(
     rotatedCtx.restore();
     source.width = 0;
     source.height = 0;
-    return { ...b, w: rotated.width, h: rotated.height, idx, canvas: rotated };
+    return {
+      ...b,
+      w: rotated.width,
+      h: rotated.height,
+      rotated: !b.rotated,
+      idx,
+      canvas: rotated,
+    };
   });
 
   crops.sort((a, b) => {

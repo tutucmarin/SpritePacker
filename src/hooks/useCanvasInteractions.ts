@@ -4,12 +4,12 @@ import type { ComponentBox } from "@/src/lib/types";
 type Params = {
   img: HTMLImageElement | null;
   boxes: ComponentBox[];
-  selected: number | null;
+  selected: number[];
   overlayRef: React.RefObject<HTMLCanvasElement>;
   editMode: boolean;
-  onSelect: (idx: number | null) => void;
+  onSelect: (idx: number | null, additive?: boolean) => void;
+  onSelectMany: (indices: number[], additive?: boolean) => void;
   onMoveBox: (updater: (prev: ComponentBox[]) => ComponentBox[]) => void;
-  onAddBox: (box: ComponentBox) => number | null;
 };
 
 export function useCanvasInteractions({
@@ -19,18 +19,20 @@ export function useCanvasInteractions({
   overlayRef,
   editMode,
   onSelect,
+  onSelectMany,
   onMoveBox,
-  onAddBox,
 }: Params) {
-  const actionRef = useRef<"draw" | "move" | null>(null);
+  const actionRef = useRef<"select" | "move" | null>(null);
   const startPtRef = useRef<{ x: number; y: number } | null>(null);
-  const startBoxRef = useRef<ComponentBox | null>(null);
+  const startBoxesRef = useRef<Map<number, ComponentBox>>(new Map());
+  const moveIndicesRef = useRef<number[]>([]);
+  const additiveSelectionRef = useRef(false);
   const panStartRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [draftBox, setDraftBox] = useState<ComponentBox | null>(null);
-  const MIN_DRAW = 6;
+  const MIN_SELECTION_DRAG = 3;
 
   const toImgPoint = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = overlayRef.current;
@@ -46,44 +48,54 @@ export function useCanvasInteractions({
   const resetDrag = () => {
     actionRef.current = null;
     startPtRef.current = null;
-    startBoxRef.current = null;
+    startBoxesRef.current.clear();
+    moveIndicesRef.current = [];
+    additiveSelectionRef.current = false;
     setDraftBox(null);
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (e.metaKey) {
+    if (e.button === 1 || e.altKey) {
       panStartRef.current = {
         x: e.clientX,
         y: e.clientY,
         px: pan.x,
         py: pan.y,
       };
+      e.currentTarget.setPointerCapture(e.pointerId);
       setIsPanning(true);
       return;
     }
+
     const pt = toImgPoint(e);
-    if (!pt) return;
-    const hit = boxes.findIndex(
-      (b) =>
-        pt.x >= b.x && pt.x <= b.x + b.w && pt.y >= b.y && pt.y <= b.y + b.h,
-    );
-    if (!editMode) {
-      if (hit >= 0) onSelect(selected === hit ? null : hit);
-      return;
-    }
+    if (!pt || !editMode) return;
+    const additive = e.metaKey || e.ctrlKey || e.shiftKey;
+    const hit = findHitIndex(boxes, pt);
+
+    e.currentTarget.setPointerCapture(e.pointerId);
     setDraftBox(null);
     if (hit >= 0) {
-      onSelect(selected === hit ? null : hit);
+      if (additive) {
+        onSelect(hit, true);
+        return;
+      }
+
+      const moving = selected.includes(hit) ? selected : [hit];
+      if (!selected.includes(hit)) onSelect(hit);
       startPtRef.current = pt;
-      startBoxRef.current = { ...boxes[hit] };
+      moveIndicesRef.current = moving;
+      startBoxesRef.current = new Map(
+        moving.map((index) => [index, { ...boxes[index] }]),
+      );
       actionRef.current = "move";
-    } else {
-      onSelect(null);
-      startPtRef.current = pt;
-      startBoxRef.current = { x: pt.x, y: pt.y, w: 0, h: 0 };
-      setDraftBox({ x: pt.x, y: pt.y, w: 1, h: 1 });
-      actionRef.current = "draw";
+      return;
     }
+
+    if (!additive) onSelect(null);
+    startPtRef.current = pt;
+    additiveSelectionRef.current = additive;
+    setDraftBox({ x: pt.x, y: pt.y, w: 1, h: 1 });
+    actionRef.current = "select";
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -95,67 +107,51 @@ export function useCanvasInteractions({
     if (!editMode) return;
     const pt = toImgPoint(e);
     const startPt = startPtRef.current;
-    const startBox = startBoxRef.current;
-    if (!pt || !startPt || !startBox) return;
-    if (actionRef.current === "move" && selected != null) {
-      const dx = pt.x - startPt.x;
-      const dy = pt.y - startPt.y;
+    if (!pt || !startPt) return;
+
+    if (actionRef.current === "move" && moveIndicesRef.current.length) {
+      const starts = [...startBoxesRef.current.values()];
+      const minX = Math.min(...starts.map((box) => box.x));
+      const minY = Math.min(...starts.map((box) => box.y));
+      const maxRight = Math.max(...starts.map((box) => box.x + box.w));
+      const maxBottom = Math.max(...starts.map((box) => box.y + box.h));
+      const dx = clamp(pt.x - startPt.x, -minX, (img?.width ?? maxRight) - maxRight);
+      const dy = clamp(pt.y - startPt.y, -minY, (img?.height ?? maxBottom) - maxBottom);
       onMoveBox((prev) =>
-        prev.map((b, i) =>
-          i === selected
-            ? {
-                ...b,
-                x: clamp(startBox.x + dx, 0, (img?.width || b.x) - b.w),
-                y: clamp(startBox.y + dy, 0, (img?.height || b.y) - b.h),
-              }
-            : b,
-        ),
+        prev.map((box, index) => {
+          const start = startBoxesRef.current.get(index);
+          return start ? { ...box, x: start.x + dx, y: start.y + dy } : box;
+        }),
       );
       return;
     }
-    if (actionRef.current === "draw") {
-      const x1 = Math.min(startBox.x, pt.x);
-      const y1 = Math.min(startBox.y, pt.y);
-      const x2 = Math.max(startBox.x, pt.x);
-      const y2 = Math.max(startBox.y, pt.y);
-      setDraftBox({
-        x: x1,
-        y: y1,
-        w: Math.max(1, x2 - x1),
-        h: Math.max(1, y2 - y1),
-      });
+
+    if (actionRef.current === "select") {
+      setDraftBox(rectFromPoints(startPt, pt));
     }
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
     if (panStartRef.current) {
       panStartRef.current = null;
       setIsPanning(false);
       return;
     }
     if (!editMode) return;
+
     const pt = toImgPoint(e);
     const startPt = startPtRef.current;
-    const startBox = startBoxRef.current;
-    if (!pt || !startPt || !startBox) {
-      resetDrag();
-      return;
-    }
-    if (actionRef.current === "draw") {
-      const x1 = Math.min(startBox.x, pt.x);
-      const y1 = Math.min(startBox.y, pt.y);
-      const x2 = Math.max(startBox.x, pt.x);
-      const y2 = Math.max(startBox.y, pt.y);
-      const b = {
-        id: Date.now(),
-        x: x1,
-        y: y1,
-        w: Math.max(2, x2 - x1),
-        h: Math.max(2, y2 - y1),
-      };
-      if (b.w >= MIN_DRAW && b.h >= MIN_DRAW) {
-        const idx = onAddBox(b);
-        if (idx != null) onSelect(idx);
+    if (actionRef.current === "select" && pt && startPt) {
+      const selection = rectFromPoints(startPt, pt);
+      if (selection.w >= MIN_SELECTION_DRAG || selection.h >= MIN_SELECTION_DRAG) {
+        const matches = boxes
+          .map((box, index) => ({ box, index }))
+          .filter(({ box }) => intersects(selection, box))
+          .map(({ index }) => index);
+        onSelectMany(matches, additiveSelectionRef.current);
       }
     }
     resetDrag();
@@ -165,8 +161,7 @@ export function useCanvasInteractions({
     if (!img) return;
     e.preventDefault();
     e.stopPropagation();
-    const delta = -e.deltaY;
-    const factor = delta > 0 ? 1.1 : 0.9;
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
     setZoom((z) => clamp(z * factor, 0.2, 5));
   };
 
@@ -184,11 +179,42 @@ export function useCanvasInteractions({
       onPointerDown,
       onPointerMove,
       onPointerUp,
-      onPointerLeave: onPointerUp,
+      onPointerCancel: onPointerUp,
     },
     onWheel,
     resetZoom,
   };
+}
+
+function rectFromPoints(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    w: Math.max(1, Math.abs(b.x - a.x)),
+    h: Math.max(1, Math.abs(b.y - a.y)),
+  };
+}
+
+function intersects(a: ComponentBox, b: ComponentBox) {
+  return a.x <= b.x + b.w && a.x + a.w >= b.x && a.y <= b.y + b.h && a.y + a.h >= b.y;
+}
+
+function findHitIndex(
+  boxes: ComponentBox[],
+  point: { x: number; y: number },
+) {
+  for (let index = boxes.length - 1; index >= 0; index--) {
+    const box = boxes[index];
+    if (
+      point.x >= box.x &&
+      point.x <= box.x + box.w &&
+      point.y >= box.y &&
+      point.y <= box.y + box.h
+    ) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function clamp(v: number, min: number, max: number) {

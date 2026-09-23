@@ -98,7 +98,7 @@ export function SpriteInfo({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept=".png,.apng,.jpg,.jpeg,.jfif,.webp,.gif,.bmp,.avif,.svg,.ico,.tif,.tiff,.heic,.heif,image/*"
               style={{ display: "none" }}
               onChange={(e) => {
                 const f = e.target.files?.[0];
@@ -108,8 +108,8 @@ export function SpriteInfo({
             />
               <button
                 className="secondary btn-icon"
-                title="Size must match on width or height (±1px)."
-                aria-label="Upload replacement sprite (size must match on width or height, plus or minus one pixel)"
+                title="Replace with an image of any size."
+                aria-label="Upload replacement sprite"
                 onClick={() => fileInputRef.current?.click()}
               >
                 Upload
